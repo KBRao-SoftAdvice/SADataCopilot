@@ -1,0 +1,44 @@
+{
+  "scopeName": "source.markdown.claude",
+  "name": "Claude Prompt",
+  "patterns": [
+    { "include": "#fenced_code" },
+    { "include": "#inline_code" },
+    { "include": "#bold" },
+    { "include": "#italic" },
+    { "include": "#heading" }
+  ],
+  "repository": {
+    "heading": {
+      "match": "^(#{1,6})\\s+(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.heading.markdown" },
+        "2": { "name": "markup.heading.markdown" }
+      }
+    },
+    "bold": {
+      "match": "\\*\\*(.+?)\\*\\*",
+      "captures": {
+        "1": { "name": "markup.bold.markdown" }
+      }
+    },
+    "italic": {
+      "match": "(?<!\\*)\\*([^*]+)\\*(?!\\*)",
+      "captures": {
+        "1": { "name": "markup.italic.markdown" }
+      }
+    },
+    "inline_code": {
+      "match": "`([^`]+)`",
+      "captures": {
+        "1": { "name": "markup.inline.raw.string.markdown" }
+      }
+    },
+    "fenced_code": {
+      "begin": "^```\\w*$",
+      "end": "^```$",
+      "name": "markup.fenced_code.block.markdown",
+      "contentName": "meta.embedded.block"
+    }
+  }
+}

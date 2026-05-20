@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Notebook</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  /* Jupyter-classic light palette */
+  :root {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-alt: #f5f5f5;
+    --code-bg: #f7f7f7;
+    --output-bg: #ffffff;
+    --border: #cfcfcf;
+    --border-soft: #e5e5e5;
+    --text: #000000;
+    --text-dim: #555555;
+    --accent: #2196f3;       /* Jupyter active-cell blue */
+    --accent-edit: #1976d2;
+    --prompt: #303f9f;       /* In [n]: indigo */
+    --markdown: #607d8b;
+    --green: #2e7d32;
+    --yellow: #f9a825;
+    --red: #d32f2f;
+    --tool-python: #6a1b9a;
+    --tool-bash: #ef6c00;
+    --tool-edit: #1565c0;
+    --tool-write: #2e7d32;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  .app { max-width: 1100px; margin: 0 auto; padding: 16px 20px 60px; }
+
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: var(--surface-alt);
+    border: 1px solid var(--border); border-radius: 4px; margin-bottom: 12px;
+  }
+  .header h1 { font-size: 15px; font-weight: 500; color: var(--text); }
+  .header h1 span { color: var(--accent-edit); font-weight: 600; }
+  .header-actions { display: flex; gap: 6px; align-items: center; }
+
+  .btn {
+    padding: 4px 10px; border-radius: 3px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-family: inherit;
+    font-size: 12px; cursor: pointer; transition: background 0.1s, border-color 0.1s;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .btn:hover { background: var(--surface-alt); border-color: #999; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-danger { border-color: var(--red); color: var(--red); }
+  .btn-danger:hover { background: #fdecea; }
+  .btn-primary { background: var(--accent-edit); border-color: var(--accent-edit); color: #fff; }
+  .btn-primary:hover { background: #1565c0; }
+  .btn-sm { padding: 2px 7px; font-size: 11px; }
+  .file-input { display: none; }
+
+  .cells { display: flex; flex-direction: column; gap: 0; }
+
+  /* Cell — Jupyter "In/Out" structure with a left "prompt" gutter */
+  .cell {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: var(--surface);
+    margin-bottom: 4px;
+  }
+  .cell.focused {
+    border-color: var(--accent);
+    box-shadow: inset 4px 0 0 var(--accent);
+  }
+  .cell.excluded { opacity: 0.55; }
+  .cell.excluded .cell-prompt { color: var(--text-dim); }
+
+  .cell-prompt {
+    grid-row: 1 / span 3;
+    padding: 6px 8px 0 8px;
+    font-family: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+    font-size: 12px;
+    color: var(--prompt);
+    text-align: right;
+    user-select: none;
+    line-height: 1.5;
+  }
+  .cell.kind-markdown .cell-prompt { color: var(--markdown); }
+  .cell.kind-prompt .cell-prompt { color: #6a1b9a; }
+  .cell-prompt-label { display: block; }
+  .cell-prompt-actions {
+    margin-top: 4px;
+    display: flex; gap: 2px; flex-wrap: wrap; justify-content: flex-end;
+  }
+
+  .cell-body { display: flex; flex-direction: column; min-width: 0; }
+
+  .cell-toolbar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 8px; font-size: 11px; color: var(--text-dim);
+    background: var(--surface-alt); border: 1px solid var(--border-soft);
+    border-bottom: none;
+  }
+  .cell-kind-tag {
+    padding: 0 6px; border-radius: 2px; font-weight: 500;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+    border: 1px solid currentColor;
+  }
+  .cell.kind-python .cell-kind-tag { color: var(--prompt); }
+  .cell.kind-markdown .cell-kind-tag { color: var(--markdown); }
+  .cell.kind-prompt .cell-kind-tag { color: #6a1b9a; }
+  .cell-toolbar .spacer { flex: 1; }
+  .icon-btn {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-size: 12px; padding: 1px 6px; border-radius: 2px;
+  }
+  .icon-btn:hover { background: #e0e0e0; color: var(--text); }
+  .icon-btn.active { color: var(--accent-edit); }
+  .run-btn-cell {
+    background: var(--surface); color: var(--accent-edit);
+    border: 1px solid var(--accent-edit);
+    padding: 1px 8px; border-radius: 2px;
+    font-size: 11px; font-weight: 500; cursor: pointer; font-family: inherit;
+  }
+  .run-btn-cell:hover { background: #e3f2fd; }
+  .run-btn-cell.cancel { color: var(--red); border-color: var(--red); }
+  .run-btn-cell.cancel:hover { background: #fdecea; }
+  .model-select {
+    font-family: inherit; font-size: 11px; padding: 1px 4px;
+    border: 1px solid var(--border); border-radius: 2px; background: var(--surface);
+    color: var(--text);
+  }
+
+  /* Cell input area (the "In[]" box) */
+  .cell-source {
+    border: 1px solid var(--border-soft);
+    background: var(--code-bg);
+  }
+  .cell-source textarea {
+    width: 100%; min-height: 32px; padding: 6px 10px;
+    background: transparent; border: none; color: var(--text);
+    font-family: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+    font-size: 13px; line-height: 1.5;
+    resize: vertical; outline: none; display: block;
+  }
+  .cell-source.markdown { background: #fafafa; }
+  .cell-source.markdown textarea { font-family: inherit; }
+  .cell-source.prompt { background: #f5f0fa; border-left: 3px solid #ce93d8; }
+  .cell-source.prompt textarea { font-family: inherit; }
+
+  /* Output area (the "Out[]" box) */
+  .cell-output {
+    background: var(--output-bg);
+    border: 1px solid var(--border-soft);
+    border-top: none;
+    padding: 6px 10px; font-size: 12px;
+    max-height: 600px; overflow-y: auto;
+    font-family: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+  }
+  .cell-output pre {
+    background: transparent; border: none; padding: 0;
+    font-size: 12px; line-height: 1.4;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--text); margin: 0;
+    font-family: inherit;
+  }
+  .stdout { color: var(--text); }
+  .stderr { color: var(--red); background: #fdecea; padding: 4px 6px; border-radius: 2px; }
+
+  /* Markdown rendered output (matches Jupyter's normal text) */
+  .md-render {
+    line-height: 1.6; font-size: 14px;
+    padding: 8px 12px; color: var(--text);
+  }
+  .md-render p { margin: 6px 0; }
+  .md-render h1 { font-size: 22px; font-weight: 600; margin: 14px 0 8px; color: var(--text); border-bottom: 1px solid var(--border-soft); padding-bottom: 4px; }
+  .md-render h2 { font-size: 18px; font-weight: 600; margin: 12px 0 6px; color: var(--text); }
+  .md-render h3 { font-size: 15px; font-weight: 600; margin: 10px 0 4px; color: var(--text); }
+  .md-render code {
+    background: #f4f4f4; padding: 1px 4px; border-radius: 2px;
+    font-family: 'Menlo', 'Consolas', monospace; font-size: 90%;
+    color: #c7254e;
+  }
+  .md-render pre {
+    background: var(--code-bg); border: 1px solid var(--border-soft);
+    padding: 8px 10px; border-radius: 2px; overflow-x: auto;
+    font-family: 'Menlo', 'Consolas', monospace; font-size: 12px;
+  }
+  .md-render pre code { background: none; padding: 0; color: var(--text); }
+  .md-render ul, .md-render ol { padding-left: 24px; margin: 6px 0; }
+  .md-render strong { color: var(--text); }
+  .md-render table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .md-render th, .md-render td { border: 1px solid var(--border); padding: 4px 10px; }
+  .md-render th { background: var(--surface-alt); font-weight: 600; }
+  .md-render blockquote {
+    border-left: 4px solid #ddd; padding-left: 10px;
+    color: var(--text-dim); margin: 8px 0;
+  }
+
+  /* Transcript blocks (assistant text + tool calls + tool results) */
+  .transcript {
+    background: var(--output-bg); padding: 4px 0;
+    max-height: 600px; overflow-y: auto;
+  }
+  .assistant-block {
+    margin: 4px 0; padding: 6px 10px;
+    background: #f3f8fe;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 2px 2px 0;
+    font-size: 13px; line-height: 1.55;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .assistant-block p { margin: 4px 0; }
+  .assistant-block code { background: #e8eef5; padding: 1px 4px; border-radius: 2px; font-family: 'Menlo', monospace; font-size: 12px; color: #c7254e; }
+  .assistant-block pre { background: var(--code-bg); border: 1px solid var(--border-soft); padding: 6px 8px; border-radius: 2px; margin: 4px 0; font-size: 12px; overflow-x: auto; font-family: 'Menlo', monospace; }
+  .tool-block {
+    margin: 6px 0 6px 8px; padding-left: 10px;
+    border-left: 3px solid var(--tool-python);
+  }
+  .tool-block.bash { border-color: var(--tool-bash); }
+  .tool-block.edit { border-color: var(--tool-edit); }
+  .tool-block.write { border-color: var(--tool-write); }
+  .tool-block.python { border-color: var(--tool-python); }
+  .tool-block-tag {
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 11px; font-weight: 600;
+    color: var(--tool-python); margin-bottom: 3px;
+  }
+  .tool-block.bash .tool-block-tag { color: var(--tool-bash); }
+  .tool-block.edit .tool-block-tag { color: var(--tool-edit); }
+  .tool-block.write .tool-block-tag { color: var(--tool-write); }
+  .tool-block-body {
+    background: var(--code-bg); color: var(--text);
+    border: 1px solid var(--border-soft);
+    padding: 6px 8px; border-radius: 2px;
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 12px; white-space: pre-wrap;
+    word-break: break-word; overflow-x: auto;
+  }
+  .tool-result {
+    margin: 2px 0 8px 24px; padding-left: 8px;
+    border-left: 2px dashed #bbb;
+    font-size: 12px;
+  }
+  .tool-result-tag { color: var(--text-dim); margin-bottom: 3px; font-size: 11px; font-family: 'Menlo', monospace; }
+  .tool-result-body {
+    background: var(--surface-alt); padding: 6px 8px; border-radius: 2px;
+    color: var(--text); white-space: pre-wrap; word-break: break-word;
+    font-family: 'Menlo', monospace; font-size: 12px;
+    border: 1px solid var(--border-soft);
+  }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-dim); }
+  .empty-state h2 { color: var(--text); margin-bottom: 8px; font-size: 17px; font-weight: 500; }
+  .empty-state p { margin-bottom: 14px; font-size: 13px; }
+
+  .add-cell-bar {
+    display: flex; gap: 6px; justify-content: center;
+    padding: 4px; margin: 2px 0;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .cells:hover .add-cell-bar { opacity: 1; }
+  .add-cell-bar:hover { opacity: 1; }
+  .add-cell-bar .btn { font-size: 11px; padding: 2px 8px; }
+
+  /* Status bar (sticky bottom) */
+  .status-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--surface-alt); border-top: 1px solid var(--border);
+    padding: 4px 16px; display: flex; gap: 16px; align-items: center;
+    font-size: 11px; color: var(--text-dim); z-index: 50;
+    font-family: 'Menlo', 'Consolas', monospace;
+  }
+  .status-bar .item { display: inline-flex; gap: 4px; align-items: center; }
+  .status-bar .label { color: var(--text-dim); }
+  .status-bar .val { color: var(--text); font-weight: 500; }
+  .status-bar .spacer { flex: 1; }
+
+  /* Modals */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 18px; max-width: 600px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+  .modal h3 { margin-bottom: 10px; font-size: 15px; font-weight: 500; }
+  .modal p { color: var(--text-dim); margin-bottom: 12px; font-size: 13px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+  .session-list { display: flex; flex-direction: column; gap: 2px; max-height: 400px; overflow-y: auto; }
+  .session-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: var(--surface);
+    border: 1px solid var(--border-soft); border-radius: 2px; cursor: pointer;
+  }
+  .session-item:hover { border-color: var(--accent); background: #f3f8fe; }
+
+  .error-bar {
+    padding: 8px 14px; background: #fdecea;
+    border: 1px solid var(--red); border-radius: 2px; margin-bottom: 10px;
+    font-size: 12px; color: var(--red); display: flex; align-items: center; justify-content: space-between;
+  }
+  .error-bar button { background: none; border: none; color: var(--red); cursor: pointer; font-size: 14px; padding: 0 4px; }
+
+  /* Spinner */
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; color: var(--text-dim); font-style: italic; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useMemo, useRef, useEffect } = React;
+
+const API = 'http://localhost:8787';
+
+// -------------------------- helpers --------------------------
+
+function uuid4() {
+  return crypto.randomUUID ? crypto.randomUUID()
+    : ('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      }));
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  return res.json();
+}
+
+function parseSessionJSONL(text) {
+  if (!text || !text.trim()) return [];
+  return text.trim().split('\n').filter(Boolean).map(line => {
+    try { return JSON.parse(line); } catch { return null; }
+  }).filter(Boolean);
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  try { return marked.parse(text, { breaks: true }); } catch { return text; }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function stringifyContent(c) {
+  return typeof c === 'string' ? c : JSON.stringify(c, null, 2);
+}
+
+function extractTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const parts = [];
+    for (const item of content) {
+      if (item && typeof item === 'object' && item.type === 'text' && typeof item.text === 'string') {
+        parts.push(item.text);
+      }
+    }
+    if (parts.length) return parts.join('\n');
+  }
+  return stringifyContent(content);
+}
+
+// Stream POST + parse SSE manually (fetch is fine; EventSource doesn't support POST).
+async function streamRun(body, onEvent, onEnd, onError) {
+  let aborter = new AbortController();
+  try {
+    const res = await fetch(API + '/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: aborter.signal,
+    });
+    if (!res.ok || !res.body) {
+      onError(new Error('HTTP ' + res.status));
+      return aborter;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Parse SSE blocks
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        let event = 'message';
+        const dataLines = [];
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event: ')) event = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataLines.push(line.slice(6));
+        }
+        if (!dataLines.length) continue;
+        try {
+          const data = JSON.parse(dataLines.join('\n'));
+          if (event === 'end') onEnd(data);
+          else if (event === 'error') onError(new Error(data.message || 'unknown'));
+          else onEvent(event, data);
+        } catch { /* skip malformed */ }
+      }
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') onError(err);
+  }
+  return aborter;
+}
+
+// -------------------------- transcript building --------------------------
+
+const HIDDEN_TOOLS = new Set(['ToolSearch']);
+const KERNEL_TOOL = 'mcp__kernel__python_run';
+const CODE_TOOLS = new Set(['Bash', 'Edit', 'Write']);
+
+// Reduce stream-json events into ordered transcript blocks.
+function reduceTranscript(blocks, event, data, toolNameById) {
+  if (event !== 'event') return blocks;
+  const t = data.type;
+  if (t === 'assistant') {
+    const message = data.message || {};
+    const content = Array.isArray(message.content) ? message.content
+                  : (typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : []);
+    for (const block of content) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        // Coalesce consecutive text blocks
+        const last = blocks[blocks.length - 1];
+        if (last && last.kind === 'text') last.text += block.text;
+        else blocks.push({ kind: 'text', text: block.text });
+      } else if (block.type === 'tool_use') {
+        const name = block.name || 'unknown';
+        const id = block.id || '';
+        if (id) toolNameById.set(id, name);
+        if (HIDDEN_TOOLS.has(name)) continue;
+        blocks.push({ kind: 'tool_use', id, name, input: block.input });
+      }
+    }
+    if (message.usage) blocks.usage = message.usage;
+  } else if (t === 'user') {
+    const message = data.message || {};
+    const content = Array.isArray(message.content) ? message.content : [];
+    for (const block of content) {
+      if (block.type === 'tool_result') {
+        const id = block.tool_use_id || '';
+        const calledName = id ? (toolNameById.get(id) || '') : '';
+        if (HIDDEN_TOOLS.has(calledName)) continue;
+        const text = calledName === KERNEL_TOOL
+          ? extractTextContent(block.content)
+          : stringifyContent(block.content);
+        blocks.push({ kind: 'tool_result', id, name: calledName, text });
+      }
+    }
+  } else if (t === 'result') {
+    blocks.result = data;
+  } else if (t === 'system') {
+    blocks.system = data;
+  }
+  return blocks;
+}
+
+function TranscriptView({ blocks }) {
+  return (
+    <div className="transcript">
+      {blocks.map((b, i) => {
+        if (b.kind === 'text') {
+          return (
+            <div key={i} className="assistant-block md-render"
+                 dangerouslySetInnerHTML={{ __html: renderMarkdown(b.text) }} />
+          );
+        }
+        if (b.kind === 'tool_use') {
+          if (b.name === KERNEL_TOOL) {
+            const code = b.input && typeof b.input.code === 'string' ? b.input.code : stringifyContent(b.input);
+            return (
+              <div key={i} className="tool-block python">
+                <div className="tool-block-tag">&gt;&gt;&gt; python (kernel)</div>
+                <div className="tool-block-body">{code}</div>
+              </div>
+            );
+          }
+          if (CODE_TOOLS.has(b.name)) {
+            const cls = b.name.toLowerCase();
+            const tag = b.name === 'Bash' ? '$ bash' : b.name === 'Edit' ? '✎ edit' : '+ write';
+            const src = b.name === 'Bash' ? (b.input?.command || '')
+                      : b.name === 'Write' ? `# Write: ${b.input?.file_path || ''}\n${b.input?.content || ''}`
+                      : (b.input?.old_string ? `# Edit: ${b.input.file_path || ''}\n# old:\n${b.input.old_string}\n# new:\n${b.input.new_string || ''}`
+                                              : stringifyContent(b.input));
+            return (
+              <div key={i} className={`tool-block ${cls}`}>
+                <div className="tool-block-tag">{tag}</div>
+                <div className="tool-block-body">{String(src)}</div>
+              </div>
+            );
+          }
+          return (
+            <div key={i} className="tool-block">
+              <div className="tool-block-tag">{b.name}</div>
+              <div className="tool-block-body">{stringifyContent(b.input)}</div>
+            </div>
+          );
+        }
+        if (b.kind === 'tool_result') {
+          const trunc = b.text && b.text.length > 4000 ? b.text.slice(0, 4000) + '\n... (truncated)' : b.text;
+          return (
+            <div key={i} className="tool-result">
+              <div className="tool-result-tag">↳ result</div>
+              <div className="tool-result-body">{trunc}</div>
+            </div>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+// -------------------------- cell components --------------------------
+
+function CellToolbar({ cell, running, onRun, onCancel, onToggleInclude, onChangeModel }) {
+  return (
+    <div className="cell-toolbar">
+      <span className="cell-kind-tag">{cell.kind}</span>
+      {cell.kind === 'prompt' && (
+        <select className="model-select" value={cell.model || 'sonnet'} onChange={(e) => onChangeModel(e.target.value)} title="Model">
+          <option value="sonnet">sonnet</option>
+          <option value="opus">opus</option>
+        </select>
+      )}
+      {(cell.kind === 'python' || cell.kind === 'prompt') && (
+        <button className={`icon-btn ${cell.included !== false ? 'active' : ''}`} title="Include in next prompt's context"
+                onClick={onToggleInclude}>{cell.included !== false ? '◉ included' : '○ excluded'}</button>
+      )}
+      <span className="spacer" />
+      {cell.kind !== 'markdown' && (
+        running
+          ? <button className="run-btn-cell cancel" onClick={onCancel}>■ Stop</button>
+          : <button className="run-btn-cell" onClick={onRun}>▶ Run</button>
+      )}
+    </div>
+  );
+}
+
+function PromptGutter({ kind, runNumber, running, onMoveUp, onMoveDown, onDelete }) {
+  let label;
+  if (kind === 'python') label = `In [${runNumber || ' '}]:`;
+  else if (kind === 'prompt') label = running ? 'In [*]:' : `In [${runNumber || ' '}]:`;
+  else label = '';
+  return (
+    <div className="cell-prompt">
+      <span className="cell-prompt-label">{label}</span>
+      <div className="cell-prompt-actions">
+        <button className="icon-btn" title="Move up" onClick={onMoveUp}>↑</button>
+        <button className="icon-btn" title="Move down" onClick={onMoveDown}>↓</button>
+        <button className="icon-btn" title="Delete cell" onClick={onDelete}>×</button>
+      </div>
+    </div>
+  );
+}
+
+function PythonCell({ cell, running, onRun, onCancel, onChange, onMoveUp, onMoveDown, onDelete, ...rest }) {
+  const taRef = useRef(null);
+  const auto = () => {
+    const el = taRef.current; if (!el) return;
+    el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 400) + 'px';
+  };
+  useEffect(auto, [cell.source]);
+  return (
+    <div className={`cell kind-python ${cell.included === false ? 'excluded' : ''}`}>
+      <PromptGutter kind="python" runNumber={cell.runNumber} running={running} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onDelete={onDelete} />
+      <div className="cell-body">
+        <CellToolbar cell={cell} running={running} onRun={onRun} onCancel={onCancel} {...rest} />
+        <div className="cell-source python">
+          <textarea ref={taRef} value={cell.source}
+                    onChange={(e) => { onChange({ source: e.target.value }); auto(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onRun(); } }}
+                    placeholder="# Python code (Shift+Enter or Cmd+Enter to run)" spellCheck={false} />
+        </div>
+        {(cell.output || cell.outputErr) && (
+          <div className="cell-output">
+            {cell.output && <pre className="stdout">{cell.output}</pre>}
+            {cell.outputErr && <pre className="stderr">{cell.outputErr}</pre>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MarkdownCell({ cell, onChange, onMoveUp, onMoveDown, onDelete, ...rest }) {
+  const [editing, setEditing] = useState(!cell.source);
+  const taRef = useRef(null);
+  useEffect(() => {
+    const el = taRef.current; if (!el) return;
+    el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 400) + 'px';
+  }, [cell.source, editing]);
+  return (
+    <div className={`cell kind-markdown ${editing ? 'focused' : ''}`}>
+      <PromptGutter kind="markdown" onMoveUp={onMoveUp} onMoveDown={onMoveDown} onDelete={onDelete} />
+      <div className="cell-body">
+        <CellToolbar cell={cell} {...rest} onRun={() => setEditing(false)} onCancel={() => {}} running={false} />
+        {editing ? (
+          <div className="cell-source markdown">
+            <textarea ref={taRef} value={cell.source}
+                      onChange={(e) => onChange({ source: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); setEditing(false); } }}
+                      placeholder="Markdown — Cmd+Enter to render" spellCheck={false} />
+          </div>
+        ) : (
+          <div className="md-render" onDoubleClick={() => setEditing(true)}
+               dangerouslySetInnerHTML={{ __html: renderMarkdown(cell.source || '*(empty markdown — double-click to edit)*') }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PromptCell({ cell, running, onRun, onCancel, onChange, onMoveUp, onMoveDown, onDelete, ...rest }) {
+  const taRef = useRef(null);
+  const auto = () => {
+    const el = taRef.current; if (!el) return;
+    el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 300) + 'px';
+  };
+  useEffect(auto, [cell.source]);
+  return (
+    <div className={`cell kind-prompt ${cell.included === false ? 'excluded' : ''}`}>
+      <PromptGutter kind="prompt" runNumber={cell.runNumber} running={running} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onDelete={onDelete} />
+      <div className="cell-body">
+        <CellToolbar cell={cell} running={running} onRun={onRun} onCancel={onCancel} {...rest} />
+        <div className="cell-source prompt">
+          <textarea ref={taRef} value={cell.source}
+                    onChange={(e) => { onChange({ source: e.target.value }); auto(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onRun(); } }}
+                    placeholder="Ask Claude... (Cmd+Enter)" spellCheck={false} />
+        </div>
+        {(cell.transcript && cell.transcript.length > 0) && (
+          <div className="cell-output">
+            <TranscriptView blocks={cell.transcript} />
+            {(cell.usage || cell.duration) && (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-dim)', fontFamily: "'Menlo', monospace" }}>
+                {cell.usage && <span>in: {formatTokens(cell.usage.input_tokens || 0)} • out: {formatTokens(cell.usage.output_tokens || 0)}</span>}
+                {cell.duration && <span style={{ marginLeft: 12 }}>{(cell.duration / 1000).toFixed(1)}s</span>}
+                {cell.cost ? <span style={{ marginLeft: 12, color: 'var(--green)' }}>${cell.cost.toFixed(4)}</span> : null}
+              </div>
+            )}
+          </div>
+        )}
+        {running && (!cell.transcript || cell.transcript.length === 0) && (
+          <div className="cell-output"><span className="pulse">claude is thinking…</span></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddCellBar({ onAdd }) {
+  return (
+    <div className="add-cell-bar">
+      <button className="btn" onClick={() => onAdd('python')}>+ Python</button>
+      <button className="btn" onClick={() => onAdd('markdown')}>+ Markdown</button>
+      <button className="btn" onClick={() => onAdd('prompt')}>+ Prompt</button>
+    </div>
+  );
+}
+
+// -------------------------- App --------------------------
+
+function newCell(kind) {
+  const base = { id: uuid4(), kind, source: '', included: true };
+  if (kind === 'python') return { ...base, output: '', outputErr: '' };
+  if (kind === 'markdown') return { ...base };
+  if (kind === 'prompt') return { ...base, model: 'sonnet', transcript: [], usage: null, duration: 0, cost: 0 };
+  return base;
+}
+
+function App() {
+  const [cells, setCells] = useState(() => [newCell('python')]);
+  const [sessionId, setSessionId] = useState('');
+  const [contextLimit, setContextLimit] = useState(200000);
+  const [totalCost, setTotalCost] = useState(0);
+  const [lastInputTokens, setLastInputTokens] = useState(0);
+  const [error, setError] = useState('');
+  const [running, setRunning] = useState({});  // cellId -> AbortController
+  const [sessions, setSessions] = useState([]);
+  const [showSessions, setShowSessions] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const fileRef = useRef();
+  const kernelIdRef = useRef(uuid4());
+  const runCounterRef = useRef(0);
+
+  const updateCell = useCallback((id, patch) => {
+    setCells((prev) => prev.map((c) => c.id === id ? { ...c, ...patch } : c));
+  }, []);
+
+  const moveCell = useCallback((id, dir) => {
+    setCells((prev) => {
+      const i = prev.findIndex((c) => c.id === id); if (i < 0) return prev;
+      const j = i + dir; if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev]; [next[i], next[j]] = [next[j], next[i]]; return next;
+    });
+  }, []);
+
+  const insertCell = useCallback((afterId, kind) => {
+    setCells((prev) => {
+      const i = afterId ? prev.findIndex((c) => c.id === afterId) : prev.length - 1;
+      const next = [...prev]; next.splice(i + 1, 0, newCell(kind)); return next;
+    });
+  }, []);
+
+  const removeCell = useCallback((id) => {
+    setCells((prev) => prev.length > 1 ? prev.filter((c) => c.id !== id) : prev);
+  }, []);
+
+  // ----- python cell run -----
+  const runPython = useCallback(async (cell) => {
+    if (!cell.source.trim()) return;
+    updateCell(cell.id, { output: '', outputErr: '(running...)' });
+    try {
+      const data = await api('/api/python/exec', {
+        method: 'POST',
+        body: JSON.stringify({ kernelId: kernelIdRef.current, code: cell.source }),
+      });
+      if (data.error) {
+        updateCell(cell.id, { output: '', outputErr: data.error });
+        return;
+      }
+      runCounterRef.current += 1;
+      updateCell(cell.id, {
+        output: data.ok ? data.output : '',
+        outputErr: data.ok ? '' : data.output,
+        runNumber: runCounterRef.current,
+      });
+    } catch (e) {
+      updateCell(cell.id, { output: '', outputErr: 'Server error: ' + e.message });
+    }
+  }, [updateCell]);
+
+  // ----- prompt cell run -----
+  const runPrompt = useCallback(async (cell) => {
+    if (!cell.source.trim()) return;
+    if (running[cell.id]) return;
+
+    // Build seed history from prior INCLUDED cells (markdown + python + prior prompts).
+    // For prompt cells we use the existing sessionId (if any) so claude resumes
+    // the on-disk session — that gives it real tool history. For non-prompt
+    // included cells, we add them as user-text turns into a new seed history
+    // (only if no sessionId yet; once we have one, the existing session
+    // already has the prior context).
+    const idx = cells.findIndex((c) => c.id === cell.id);
+    const priorIncluded = cells.slice(0, idx).filter((c) => c.included !== false);
+    const seedHistory = !sessionId ? priorIncluded.map((c) => {
+      if (c.kind === 'python') {
+        return { role: 'user', content: `Python cell (executed):\n\`\`\`python\n${c.source}\n\`\`\`\nOutput:\n\`\`\`\n${c.output || c.outputErr || '(no output)'}\n\`\`\`` };
+      }
+      if (c.kind === 'markdown') {
+        return { role: 'user', content: `Notebook context:\n${c.source}` };
+      }
+      if (c.kind === 'prompt') {
+        const reply = (c.transcript || []).filter((b) => b.kind === 'text').map((b) => b.text).join('\n');
+        return [
+          { role: 'user', content: c.source },
+          ...(reply ? [{ role: 'assistant', content: reply }] : []),
+        ];
+      }
+      return null;
+    }).flat().filter(Boolean) : [];
+
+    // Reset cell state
+    runCounterRef.current += 1;
+    updateCell(cell.id, { transcript: [], usage: null, duration: 0, cost: 0, runNumber: runCounterRef.current });
+
+    const blocks = [];
+    const toolNameById = new Map();
+
+    const onEvent = (eventName, data) => {
+      reduceTranscript(blocks, eventName, data, toolNameById);
+      // Record running totals
+      if (data.type === 'assistant' && data.message?.usage) {
+        const usage = data.message.usage;
+        const totalIn = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
+        setLastInputTokens(totalIn);
+      }
+      updateCell(cell.id, { transcript: [...blocks] });
+    };
+
+    const onEnd = (data) => {
+      if (data.sessionId) setSessionId(data.sessionId);
+      const r = blocks.result || {};
+      const usage = r.usage;
+      if (usage) {
+        const totalIn = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
+        setLastInputTokens(totalIn);
+      }
+      const turnCost = Number(r.total_cost_usd || 0);
+      if (turnCost) setTotalCost((p) => p + turnCost);
+      updateCell(cell.id, {
+        transcript: [...blocks],
+        usage: r.usage || null,
+        duration: r.duration_ms || 0,
+        cost: turnCost,
+      });
+      setRunning((p) => { const n = { ...p }; delete n[cell.id]; return n; });
+    };
+
+    const onError = (err) => {
+      setError('Run failed: ' + err.message);
+      setRunning((p) => { const n = { ...p }; delete n[cell.id]; return n; });
+    };
+
+    setRunning((p) => ({ ...p, [cell.id]: 'pending' }));
+    const aborter = await streamRun({
+      sessionId, history: seedHistory, prompt: cell.source,
+      kernelId: kernelIdRef.current, model: cell.model || 'sonnet',
+    }, onEvent, onEnd, onError);
+    setRunning((p) => ({ ...p, [cell.id]: aborter }));
+  }, [cells, sessionId, running, updateCell]);
+
+  const cancelRun = useCallback((cellId) => {
+    const a = running[cellId];
+    if (a && a.abort) a.abort();
+    setRunning((p) => { const n = { ...p }; delete n[cellId]; return n; });
+  }, [running]);
+
+  // ----- sessions list -----
+  const loadSessions = useCallback(async () => {
+    try {
+      const data = await api('/api/sessions');
+      setSessions(data); setShowSessions(true);
+    } catch { setError('Server not running. Start with: python3 server.py'); }
+  }, []);
+
+  const loadSession = useCallback(async (sid) => {
+    try {
+      const data = await api('/api/session/' + sid);
+      const messages = parseSessionJSONL(data.content);
+      // Reduce session messages into prompt cells (one per user turn) with
+      // attached transcripts. Python turns from prior runs are not
+      // reconstructed — the user can start adding new cells beneath.
+      const turnCells = [];
+      const toolNameById = new Map();
+      let cur = null;
+      for (const msg of messages) {
+        if (msg.type === 'user' && !msg.isMeta) {
+          if (cur) turnCells.push(cur);
+          const content = msg.message?.content;
+          const text = typeof content === 'string' ? content : '';
+          cur = newCell('prompt');
+          cur.source = text;
+          cur.transcript = [];
+          continue;
+        }
+        if (!cur) continue;
+        if (msg.type === 'assistant') {
+          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
+        } else if (msg.type === 'user' && msg.isMeta) {
+          // tool_result
+          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
+        }
+      }
+      if (cur) turnCells.push(cur);
+      setCells(turnCells.length ? turnCells : [newCell('python')]);
+      setSessionId(data.sessionId);
+      setShowSessions(false);
+      setError('');
+    } catch (e) { setError('Failed to load session: ' + e.message); }
+  }, []);
+
+  const handleFileLoad = useCallback((e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const messages = parseSessionJSONL(ev.target.result);
+      const turnCells = [];
+      const toolNameById = new Map();
+      let cur = null;
+      for (const msg of messages) {
+        if (msg.type === 'user' && !msg.isMeta) {
+          if (cur) turnCells.push(cur);
+          const content = msg.message?.content;
+          const text = typeof content === 'string' ? content : '';
+          cur = newCell('prompt');
+          cur.source = text;
+          cur.transcript = [];
+          continue;
+        }
+        if (!cur) continue;
+        if (msg.type === 'assistant') {
+          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
+        } else if (msg.type === 'user' && msg.isMeta) {
+          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
+        }
+      }
+      if (cur) turnCells.push(cur);
+      setCells(turnCells.length ? turnCells : [newCell('python')]);
+      const idMatch = file.name.match(/([a-f0-9-]{36})\.jsonl$/);
+      if (idMatch) setSessionId(idMatch[1]);
+    };
+    reader.readAsText(file); e.target.value = '';
+  }, []);
+
+  // ----- delete turns -----
+  // For a prompt-cell-driven UX, "delete turns" still means remove turns from
+  // the on-disk session. Surface this as a confirmation that takes the indices
+  // of currently EXCLUDED prompt cells (one click pruning).
+  const handlePruneExcluded = useCallback(async () => {
+    if (!sessionId) return;
+    const promptCells = cells.filter((c) => c.kind === 'prompt');
+    const excludedIndices = promptCells.map((c, i) => c.included === false ? i : -1).filter((i) => i >= 0);
+    if (excludedIndices.length === 0) { setError('No excluded prompt cells to prune.'); return; }
+    try {
+      const data = await api('/api/delete-turns', {
+        method: 'POST',
+        body: JSON.stringify({ sessionId, deleteTurnIndices: excludedIndices }),
+      });
+      if (data.error) { setError(data.error); return; }
+      setSessionId(data.sessionId);
+      // Drop excluded prompt cells from the UI
+      setCells((prev) => prev.filter((c) => c.kind !== 'prompt' || c.included !== false));
+      setShowConfirm(false);
+    } catch (e) { setError('Server error during prune: ' + e.message); }
+  }, [sessionId, cells]);
+
+  const resetAll = useCallback(() => {
+    setCells([newCell('python')]);
+    setSessionId(''); setError(''); setTotalCost(0); setLastInputTokens(0);
+    kernelIdRef.current = uuid4();
+  }, []);
+
+  const ctxPct = Math.min(100, Math.round((lastInputTokens / contextLimit) * 100));
+
+  return (
+    <div className="app">
+      <div className="header">
+        <div>
+          <h1><span>Claude</span> Notebook</h1>
+          {sessionId && <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{sessionId.slice(0, 8)}...</div>}
+        </div>
+        <div className="header-actions">
+          <select className="btn" value={contextLimit} onChange={(e) => setContextLimit(Number(e.target.value))}>
+            <option value={200000}>200k</option>
+            <option value={1000000}>1M</option>
+          </select>
+          <button className="btn" onClick={loadSessions}>Sessions</button>
+          <button className="btn" onClick={() => fileRef.current?.click()}>Load</button>
+          {sessionId && cells.some((c) => c.kind === 'prompt' && c.included === false) && (
+            <button className="btn btn-danger" onClick={() => setShowConfirm(true)}>Prune excluded</button>
+          )}
+          <button className="btn" onClick={resetAll}>New</button>
+          <input ref={fileRef} type="file" className="file-input" accept=".jsonl" onChange={handleFileLoad} />
+        </div>
+      </div>
+
+      {error && (
+        <div className="error-bar">
+          <span>{error}</span>
+          <button onClick={() => setError('')}>×</button>
+        </div>
+      )}
+
+      {showSessions && (
+        <div className="modal-overlay" onClick={() => setShowSessions(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Recent Sessions</h3>
+            <div className="session-list">
+              {sessions.map((s) => (
+                <div key={s.id} className="session-item" onClick={() => loadSession(s.id)}>
+                  <div style={{ overflow: 'hidden' }}>
+                    <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 460 }}>{s.preview}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>{s.id}</div>
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{s.turns} turns</div>
+                </div>
+              ))}
+              {sessions.length === 0 && <p style={{ color: 'var(--text-dim)', textAlign: 'center', padding: 16 }}>No sessions found</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfirm && (
+        <div className="modal-overlay" onClick={() => setShowConfirm(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Prune excluded prompt turns?</h3>
+            <p>Removes excluded prompt cells from the on-disk session and re-links the parent chain. The original session file is preserved.</p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setShowConfirm(false)}>Cancel</button>
+              <button className="btn btn-danger" onClick={handlePruneExcluded}>Prune</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="cells">
+        {cells.map((cell, i) => {
+          const handlers = {
+            onChange: (patch) => updateCell(cell.id, patch),
+            onChangeKind: (kind) => updateCell(cell.id, { kind }),
+            onChangeModel: (model) => updateCell(cell.id, { model }),
+            onToggleInclude: () => updateCell(cell.id, { included: cell.included === false }),
+            onDelete: () => removeCell(cell.id),
+            onMoveUp: () => moveCell(cell.id, -1),
+            onMoveDown: () => moveCell(cell.id, +1),
+          };
+          const isRunning = !!running[cell.id];
+          const onCancel = () => cancelRun(cell.id);
+          let view;
+          if (cell.kind === 'python') {
+            view = <PythonCell cell={cell} running={isRunning} onRun={() => runPython(cell)} onCancel={onCancel} {...handlers} />;
+          } else if (cell.kind === 'markdown') {
+            view = <MarkdownCell cell={cell} running={false} onRun={() => {}} onCancel={() => {}} {...handlers} />;
+          } else {
+            view = <PromptCell cell={cell} running={isRunning} onRun={() => runPrompt(cell)} onCancel={onCancel} {...handlers} />;
+          }
+          return (
+            <React.Fragment key={cell.id}>
+              {view}
+              <AddCellBar onAdd={(kind) => insertCell(cell.id, kind)} />
+            </React.Fragment>
+          );
+        })}
+        {cells.length === 0 && (
+          <div className="empty-state">
+            <h2>Empty notebook</h2>
+            <AddCellBar onAdd={(kind) => insertCell(null, kind)} />
+          </div>
+        )}
+      </div>
+
+      <div className="status-bar">
+        <span className="item"><span className="label">Context:</span> <span className="val">{ctxPct}%</span></span>
+        <span className="item" title={`${lastInputTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens`}>
+          <span className="label">Tokens:</span> <span className="val">{formatTokens(lastInputTokens)} / {formatTokens(contextLimit)}</span>
+        </span>
+        <span className="item"><span className="label">Cost:</span> <span className="val">${totalCost.toFixed(4)}</span></span>
+        <span className="spacer" />
+        <span className="item"><span className="label">Cells:</span> <span className="val">{cells.length}</span></span>
+        {sessionId && <span className="item"><span className="label">Session:</span> <span className="val">{sessionId.slice(0,8)}</span></span>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

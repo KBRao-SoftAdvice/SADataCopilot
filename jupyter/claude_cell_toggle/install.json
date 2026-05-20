@@ -1,0 +1,5 @@
+{
+  "packageManager": "python",
+  "packageName": "claude-cell-toggle",
+  "uninstallInstructions": "Use `pip uninstall claude-cell-toggle`"
+}

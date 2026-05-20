@@ -1,0 +1,35 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Yarn (Berry) cache and unplugged deps
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+
+# Build output
+vscode/out/
+jupyter/claude_cell_toggle/lib/
+jupyter/claude_cell_toggle/claude_cell_toggle/labextension/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Local Claude state
+.claude/settings.local.json

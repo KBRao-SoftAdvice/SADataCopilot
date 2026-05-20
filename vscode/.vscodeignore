@@ -1,0 +1,8 @@
+src/**
+renderer/**
+node_modules/**
+.vscode/**
+tsconfig*.json
+webpack.config.js
+*.map
+test/**
