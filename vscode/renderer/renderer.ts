@@ -11,7 +11,7 @@ interface ActivationResult {
   renderOutputItem(outputItem: OutputItem, element: HTMLElement): void;
 }
 
-const HIDDEN_RE = /<div[^>]*class="claude-(panel-port|clear-tools|token-payload|tool-payload)"[^>]*>(?:<\/div>)?/g;
+const HIDDEN_RE = /<div[^>]*class="copilot-(panel-port|clear-tools|token-payload|tool-payload)"[^>]*>(?:<\/div>)?/g;
 
 export const activate = (_context: RendererContext): ActivationResult => {
   return {

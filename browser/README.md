@@ -2,7 +2,7 @@
 
 A Jupyter-style notebook in your browser, built around `claude -p`. Mix **Python**, **Markdown**, and **Claude prompt** cells in one document. Prompt cells call Claude (Sonnet by default, Opus optional) and let it execute Python in the *same* live kernel mid-turn via an MCP `python_run` tool — so Claude can inspect `df`, run a quick check, and reason about the result before responding.
 
-Same feature surface as the VS Code extension and JupyterLab piece, in a single HTML page + Python backend with no build step.
+Same feature surface as the VS Code extension, in a single HTML page + Python backend with no build step.
 
 ## Features
 
@@ -12,6 +12,9 @@ Same feature surface as the VS Code extension and JupyterLab piece, in a single 
 - **Inline streaming transcript** — each prompt cell renders assistant text + tool calls + tool results as they stream in, with model text visually distinct from tool blocks. `ToolSearch` is hidden.
 - **Selective turn deletion** — exclude past prompt turns and click **Prune excluded** to rewrite the on-disk session with those turns removed and the `parentUuid` chain re-linked. Original file preserved.
 - **Session library** — list and reopen any session in `~/.claude/projects/`, or load a `.jsonl` from disk.
+- **File sidebar** — left rail lists files in the per-session workspace with sizes, refreshes after each run, and has a manual `↻` button.
+- **Per-session workspace sandbox** — every kernel gets its own temp dir, and Claude's Read/Edit/Write are locked to it via the two-layer sandbox (`sandbox.filesystem` + `permissions.allow`/`deny`). Reading anywhere else returns a permission error.
+- **Optional password gate** — set `NOTEBOOK_TOKEN=<password>` to require an HTTP Basic popup before any HTML/API call. Username is ignored; only the password is checked (constant-time compare). `/api/health` stays open for tunnel/proxy probes.
 - **Bottom status bar** — `Context: NN%` and `Cost: $0.NNNN` for the live session.
 
 ## Why
@@ -76,15 +79,18 @@ No dependencies beyond Python 3.9+ and the Claude CLI.
 cd ~/Desktop/claude/browser
 python3 server.py
 # -> Claude Notebook server running at http://localhost:8787/notebook.html
+
+# Optional: gate the UI behind a Basic-auth popup (useful when tunneling).
+NOTEBOOK_TOKEN=hunter2 python3 server.py
 ```
 
-Open `http://localhost:8787/notebook.html` in your browser.
+Open `http://localhost:8787/notebook.html` in your browser. If `NOTEBOOK_TOKEN` is set the browser shows a native popup — type any username and the password.
 
 ## Usage
 
 ### Cell types
 
-The notebook starts with one Python cell. Use the `+ Python / + Markdown / + Prompt` bar between cells to insert more. Each cell has a toolbar with:
+The notebook starts with a single prompt cell. Use the `+ Python / + Markdown / + Prompt` bar between cells to insert more. Each cell has a toolbar with:
 - run / stop button
 - include toggle (◉ / ○) — drops the cell from Claude's view of the notebook in the next prompt
 - model picker (prompt cells only)
@@ -119,16 +125,20 @@ Bottom bar shows `Context: NN%`, `Tokens: <used> / <window>`, `Cost: $0.NNNN`, c
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/health` | GET | Liveness check |
+| `/api/health` | GET | Liveness check (open — used by tunnel/proxy probes) |
 | `/api/sessions` | GET | List recent sessions in `~/.claude/projects/<cwd>` |
 | `/api/session/<sid>` | GET | Read raw JSONL |
+| `/api/files?kernelId=…` | GET | List files in the kernel's per-session workspace (used by the sidebar) |
 | `/api/python/exec` | POST | Run code in the named kernel — `{ kernelId, code } -> { ok, output }` |
 | `/api/run` | POST (SSE) | Spawn `claude -p` with stream-json + MCP config; emit `event:` SSE for each line, `end:` with the final sessionId |
 | `/api/delete-turns` | POST | Prune turns from a session and re-link parent chain |
-| `/api/kernel-bridge/run` | POST (bearer) | Internal — only the spawned MCP child calls this |
+| `/api/keepalive` | POST | Touch the kernel's last-used timestamp so the reaper leaves it alone |
+| `/api/kernel-bridge/run` | POST (bearer) | Internal — only the spawned MCP child calls this; gated by its own per-run token |
 
 ## Security notes
 
+- **Two-layer filesystem sandbox.** Every kernel runs in its own temp workspace. `claude -p` is launched with both `sandbox.filesystem` (OS-level — confines Bash and any subprocess) and `permissions.allow`/`deny` (tool-level — confines Read/Edit/Write) scoped to that workspace. Outside paths return a permission error rather than data. Note: deny rules use the single-slash `/**` form; the double-slash `//**` shadows specific allow rules and would block writes inside the workspace.
+- **Optional Basic auth on the UI.** Set `NOTEBOOK_TOKEN=<password>` and every endpoint except `/api/health` requires `Authorization: Basic …`. Compares are constant-time (`hmac.compare_digest`). `/api/kernel-bridge/run` keeps its own per-run bearer token regardless.
 - The kernel bridge is on `127.0.0.1` only and requires a per-run bearer token. Tokens are unregistered the moment `claude -p` exits.
 - The MCP child gets the URL + token via env vars, never on the command line.
 - Anyone who can already read the env of the MCP child can act as it — i.e. local-user trust boundary, same as the rest of the Claude CLI.

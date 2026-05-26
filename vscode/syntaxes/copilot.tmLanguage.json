@@ -1,6 +1,6 @@
 {
-  "scopeName": "source.markdown.claude",
-  "name": "Claude Prompt",
+  "scopeName": "source.markdown.copilot",
+  "name": "Prompt",
   "patterns": [
     { "include": "#fenced_code" },
     { "include": "#inline_code" },

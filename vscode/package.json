@@ -1,13 +1,15 @@
 {
-  "name": "claude-notebook",
-  "displayName": "Claude Notebook",
-  "description": "VS Code extension for Claude Code Jupyter kernel — prompt cells, context tracking, tool rendering",
+  "name": "copilot-notebook",
+  "displayName": "Copilot Notebook",
+  "description": "VS Code extension for Copilot SDK Jupyter kernel — prompt cells, context tracking, tool rendering",
   "version": "0.2.0",
-  "publisher": "claude-kernel",
+  "publisher": "copilot-kernel",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Notebooks"],
+  "categories": [
+    "Notebooks"
+  ],
   "activationEvents": [
     "onNotebook:jupyter-notebook"
   ],
@@ -18,54 +20,78 @@
   "contributes": {
     "languages": [
       {
-        "id": "claude-prompt",
-        "aliases": ["Claude Prompt", "claude-prompt"],
-        "extensions": [".claudeprompt"],
+        "id": "copilot-prompt",
+        "aliases": [
+          "Prompt",
+          "copilot-prompt"
+        ],
+        "extensions": [
+          ".copilotprompt"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "claude-prompt",
-        "scopeName": "source.markdown.claude",
-        "path": "./syntaxes/claude.tmLanguage.json"
+        "language": "copilot-prompt",
+        "scopeName": "source.markdown.copilot",
+        "path": "./syntaxes/copilot.tmLanguage.json"
       }
     ],
     "notebookRenderer": [
       {
-        "id": "claude-output-renderer",
-        "displayName": "Claude Output Renderer",
+        "id": "copilot-output-renderer",
+        "displayName": "Copilot Output Renderer",
         "entrypoint": "./out/renderer/renderer.js",
-        "mimeTypes": ["text/html"],
+        "mimeTypes": [
+          "text/html"
+        ],
         "requiresMessaging": "optional"
       }
     ],
     "commands": [
       {
-        "command": "claude.addPromptCell",
+        "command": "copilot.addPromptCell",
         "title": "+ Prompt",
         "icon": "$(comment-discussion)"
       },
       {
-        "command": "claude.pickModel",
-        "title": "Claude: Pick Model"
+        "command": "copilot.pickModel",
+        "title": "Copilot: Pick Model"
       },
       {
-        "command": "claude.toggleCellInclusion",
-        "title": "Claude: Toggle Inclusion"
+        "command": "copilot.toggleCellInclusion",
+        "title": "Copilot: Toggle Inclusion"
       },
       {
-        "command": "claude.resetSession",
-        "title": "Claude: Reset Session"
+        "command": "copilot.resetSession",
+        "title": "Copilot: Reset Session"
+      },
+      {
+        "command": "copilot.openBackendSetting",
+        "title": "Open Backend Setting",
+        "category": "Copilot",
+        "icon": "$(server-process)"
       }
     ],
     "menus": {
       "notebook/toolbar": [
         {
-          "command": "claude.addPromptCell",
+          "command": "copilot.addPromptCell",
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Copilot Notebook",
+      "properties": {
+        "copilotNotebook.backend": {
+          "type": "string",
+          "enum": ["copilot", "claude", "cursor"],
+          "default": "copilot",
+          "description": "Which agent backend executes prompt cells. 'copilot' uses the GitHub Copilot SDK with default credentials; per-cell picker offers GPT-5 mini (default) or GPT-5.5 with Medium/High/XHigh reasoning effort. 'claude' shells out to the `claude -p` CLI. 'cursor' shells out to the Cursor `agent -p` CLI."
+        }
+      }
     }
   },
   "scripts": {
@@ -74,13 +100,17 @@
     "package": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "css-loader": "^6.8.0",
+    "style-loader": "^3.3.0",
+    "ts-loader": "^9.5.0",
     "typescript": "^5.3.0",
     "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4",
-    "ts-loader": "^9.5.0",
-    "css-loader": "^6.8.0",
-    "style-loader": "^3.3.0"
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "^1.0.0-beta.4",
+    "zod": "^4.4.3"
   }
 }

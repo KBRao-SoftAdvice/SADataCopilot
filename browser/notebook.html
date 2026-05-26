@@ -37,7 +37,58 @@
     font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
     background: var(--bg); color: var(--text); min-height: 100vh;
   }
-  .app { max-width: 1100px; margin: 0 auto; padding: 16px 20px 60px; }
+  /* Two-column shell: file sidebar | notebook. The sidebar is a fixed
+     column on the left, the notebook keeps its centered max-width feel
+     on the right. SessionWidget remains floating top-right. */
+  .shell {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+  }
+  .file-sidebar {
+    border-right: 1px solid var(--border);
+    background: var(--surface-alt);
+    display: flex; flex-direction: column;
+    height: 100vh; position: sticky; top: 0;
+    font-size: 12px;
+  }
+  .file-sidebar .sb-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--border-soft);
+    font-weight: 500;
+  }
+  .file-sidebar .sb-header .title { color: var(--text); }
+  .file-sidebar .sb-header .ws-path {
+    font-family: 'Menlo', 'Consolas', monospace; font-size: 10px;
+    color: var(--text-dim); display: block; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .file-sidebar .sb-list {
+    flex: 1; overflow-y: auto; padding: 6px 0;
+  }
+  .file-sidebar .sb-empty {
+    padding: 10px 14px; color: var(--text-dim); font-style: italic;
+  }
+  .file-sidebar .sb-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 12px; font-family: 'Menlo', 'Consolas', monospace;
+    color: var(--text); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-sidebar .sb-item.dir { color: var(--accent-edit); }
+  .file-sidebar .sb-item .size {
+    margin-left: auto; color: var(--text-dim); font-size: 10px;
+  }
+  .file-sidebar .sb-refresh {
+    background: none; border: 1px solid var(--border); border-radius: 3px;
+    cursor: pointer; padding: 2px 6px; font-size: 11px; color: var(--text);
+  }
+  .file-sidebar .sb-refresh:hover { background: var(--surface); }
+  .file-sidebar .sb-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Right padding leaves room for the floating SessionWidget so its
+     ~220px box never overlaps cell content at narrow viewports. */
+  .app { width: 100%; max-width: 1400px; margin: 0 auto; padding: 16px 260px 60px 28px; }
 
   .header {
     display: flex; align-items: center; justify-content: space-between;
@@ -264,24 +315,41 @@
   .add-cell-bar {
     display: flex; gap: 6px; justify-content: center;
     padding: 4px; margin: 2px 0;
-    opacity: 0; transition: opacity 0.15s;
   }
-  .cells:hover .add-cell-bar { opacity: 1; }
-  .add-cell-bar:hover { opacity: 1; }
   .add-cell-bar .btn { font-size: 11px; padding: 2px 8px; }
 
-  /* Status bar (sticky bottom) */
-  .status-bar {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    background: var(--surface-alt); border-top: 1px solid var(--border);
-    padding: 4px 16px; display: flex; gap: 16px; align-items: center;
-    font-size: 11px; color: var(--text-dim); z-index: 50;
-    font-family: 'Menlo', 'Consolas', monospace;
+  /* Floating session widget (top-right) */
+  .session-widget {
+    position: fixed; top: 16px; right: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    padding: 10px 12px; min-width: 200px; z-index: 50;
+    font-family: 'Menlo', 'Consolas', monospace; font-size: 11px;
+    color: var(--text);
   }
-  .status-bar .item { display: inline-flex; gap: 4px; align-items: center; }
-  .status-bar .label { color: var(--text-dim); }
-  .status-bar .val { color: var(--text); font-weight: 500; }
-  .status-bar .spacer { flex: 1; }
+  .session-widget .row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 6px;
+  }
+  .session-widget .row:last-child { margin-bottom: 0; }
+  .session-widget .label { color: var(--text-dim); }
+  .session-widget .val { color: var(--text); font-weight: 500; }
+  .session-widget .ctx-bar {
+    height: 4px; background: var(--surface-alt); border-radius: 2px;
+    overflow: hidden; margin-top: 2px;
+  }
+  .session-widget .ctx-bar-fill {
+    height: 100%; background: var(--accent-edit);
+    transition: width 0.3s ease;
+  }
+  .session-widget .ctx-bar-fill.warn { background: var(--yellow); }
+  .session-widget .ctx-bar-fill.danger { background: var(--red); }
+  .session-widget .ctx-row { flex-direction: column; align-items: stretch; gap: 2px; }
+  .session-widget .ctx-top {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .session-widget .excluded { color: var(--text-dim); margin-left: 4px; }
+  .session-widget .cost { color: var(--green); }
 
   /* Modals */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
@@ -375,8 +443,10 @@ function extractTextContent(content) {
 }
 
 // Stream POST + parse SSE manually (fetch is fine; EventSource doesn't support POST).
-async function streamRun(body, onEvent, onEnd, onError) {
-  let aborter = new AbortController();
+// `aborter` is created by the caller so it can wire it into `running[cellId]`
+// *before* the await — otherwise the Stop button has no controller to abort
+// with until the stream is already done.
+async function streamRun(body, onEvent, onEnd, onError, aborter) {
   try {
     const res = await fetch(API + '/api/run', {
       method: 'POST',
@@ -418,7 +488,6 @@ async function streamRun(body, onEvent, onEnd, onError) {
   } catch (err) {
     if (err.name !== 'AbortError') onError(err);
   }
-  return aborter;
 }
 
 // -------------------------- transcript building --------------------------
@@ -650,9 +719,18 @@ function PromptCell({ cell, running, onRun, onCancel, onChange, onMoveUp, onMove
           <div className="cell-output">
             <TranscriptView blocks={cell.transcript} />
             {(cell.usage || cell.duration) && (
-              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-dim)', fontFamily: "'Menlo', monospace" }}>
-                {cell.usage && <span>in: {formatTokens(cell.usage.input_tokens || 0)} • out: {formatTokens(cell.usage.output_tokens || 0)}</span>}
-                {cell.duration && <span style={{ marginLeft: 12 }}>{(cell.duration / 1000).toFixed(1)}s</span>}
+              <div style={{ marginTop: 6, padding: '6px 10px', background: '#f1f5f9', borderRadius: 4, fontSize: 11, color: 'var(--text-dim)', fontFamily: "'Menlo', monospace" }}>
+                {cell.usage && (() => {
+                  const u = cell.usage;
+                  const parts = [
+                    `in: ${formatTokens(u.input_tokens || 0)}`,
+                    u.cache_read_input_tokens ? `cached: ${formatTokens(u.cache_read_input_tokens)}` : '',
+                    u.cache_creation_input_tokens ? `new_cache: ${formatTokens(u.cache_creation_input_tokens)}` : '',
+                    `out: ${formatTokens(u.output_tokens || 0)}`,
+                  ].filter(Boolean);
+                  return <span>{parts.join(' | ')}</span>;
+                })()}
+                {cell.duration ? <span style={{ marginLeft: 12 }}>{(cell.duration / 1000).toFixed(1)}s</span> : null}
                 {cell.cost ? <span style={{ marginLeft: 12, color: 'var(--green)' }}>${cell.cost.toFixed(4)}</span> : null}
               </div>
             )}
@@ -682,24 +760,69 @@ function newCell(kind) {
   const base = { id: uuid4(), kind, source: '', included: true };
   if (kind === 'python') return { ...base, output: '', outputErr: '' };
   if (kind === 'markdown') return { ...base };
-  if (kind === 'prompt') return { ...base, model: 'sonnet', transcript: [], usage: null, duration: 0, cost: 0 };
+  // `historyMessages` carries the raw stream-json slice for this turn so a
+  // future run can replay it as a synthetic prior — same shape vscode's
+  // ClaudeHistory.messages stores. Cleared at the start of each run.
+  if (kind === 'prompt') return { ...base, model: 'sonnet', transcript: [], usage: null, duration: 0, cost: 0, historyMessages: null };
   return base;
 }
 
+/** Slice the final session JSONL into "this turn's messages": from the
+ * last non-meta `user` whose content ends with `prompt`, through the end
+ * (excluding `last-prompt` and `attachment` lines that the CLI re-emits).
+ * Mirrors vscode/src/services/backends/claude.ts extractLastTurnMessages. */
+function extractLastTurnMessages(sessionContent, prompt) {
+  if (!sessionContent) return [];
+  const all = parseSessionJSONL(sessionContent);
+  if (!all.length) return [];
+  let turnStart = -1;
+  for (let i = all.length - 1; i >= 0; i--) {
+    const m = all[i];
+    if (m.type !== 'user' || m.isMeta) continue;
+    const content = m.message?.content;
+    if (typeof content === 'string' && content.endsWith(prompt)) { turnStart = i; break; }
+    if (turnStart === -1) turnStart = i;
+  }
+  if (turnStart === -1) return [];
+  const out = [];
+  for (const m of all.slice(turnStart)) {
+    if (m.type === 'last-prompt') continue;
+    if (m.type === 'attachment') continue;
+    out.push(m);
+  }
+  return out;
+}
+
 function App() {
-  const [cells, setCells] = useState(() => [newCell('python')]);
-  const [sessionId, setSessionId] = useState('');
-  const [contextLimit, setContextLimit] = useState(200000);
+  const [cells, setCells] = useState(() => [newCell('prompt')]);
+  // Browser is single-session: no persistence, no session library, no
+  // on-disk resume. Each prompt run rebuilds a synthetic session from the
+  // currently-included priors (mirrors vscode behavior).
+  const contextLimit = 200000;
   const [totalCost, setTotalCost] = useState(0);
   const [lastInputTokens, setLastInputTokens] = useState(0);
   const [error, setError] = useState('');
   const [running, setRunning] = useState({});  // cellId -> AbortController
-  const [sessions, setSessions] = useState([]);
-  const [showSessions, setShowSessions] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const fileRef = useRef();
   const kernelIdRef = useRef(uuid4());
   const runCounterRef = useRef(0);
+
+  // Keepalive ping. Server reaps kernels that haven't been pinged in
+  // ~90s, so a refreshed/closed tab's old kernel gets disposed instead
+  // of leaking. Send one immediately and then every 30s.
+  useEffect(() => {
+    let cancelled = false;
+    const ping = () => {
+      if (cancelled) return;
+      fetch(API + '/api/keepalive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kernelId: kernelIdRef.current }),
+      }).catch(() => { /* ignore — server might be restarting */ });
+    };
+    ping();
+    const id = setInterval(ping, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   const updateCell = useCallback((id, patch) => {
     setCells((prev) => prev.map((c) => c.id === id ? { ...c, ...patch } : c));
@@ -753,64 +876,85 @@ function App() {
     if (!cell.source.trim()) return;
     if (running[cell.id]) return;
 
-    // Build seed history from prior INCLUDED cells (markdown + python + prior prompts).
-    // For prompt cells we use the existing sessionId (if any) so claude resumes
-    // the on-disk session — that gives it real tool history. For non-prompt
-    // included cells, we add them as user-text turns into a new seed history
-    // (only if no sessionId yet; once we have one, the existing session
-    // already has the prior context).
+    // Always rebuild priors from the live notebook (mirrors vscode). Re-running
+    // any cell synthesizes a fresh session from its currently-included priors,
+    // so edits to earlier cells take effect immediately. Prompt cells with a
+    // captured `historyMessages` blob splice their real stream-json messages
+    // (including tool calls + results); python cells synthesize a user/assistant
+    // pair narrating the code + output.
     const idx = cells.findIndex((c) => c.id === cell.id);
-    const priorIncluded = cells.slice(0, idx).filter((c) => c.included !== false);
-    const seedHistory = !sessionId ? priorIncluded.map((c) => {
+    const priorTurns = [];
+    for (const c of cells.slice(0, idx)) {
+      if (c.included === false) continue;
       if (c.kind === 'python') {
-        return { role: 'user', content: `Python cell (executed):\n\`\`\`python\n${c.source}\n\`\`\`\nOutput:\n\`\`\`\n${c.output || c.outputErr || '(no output)'}\n\`\`\`` };
+        if (!c.source.trim()) continue;
+        priorTurns.push({
+          kind: 'python',
+          source: c.source,
+          output: c.output || c.outputErr || '',
+        });
+      } else if (c.kind === 'markdown') {
+        if (!c.source.trim()) continue;
+        priorTurns.push({ kind: 'markdown', source: c.source });
+      } else if (c.kind === 'prompt') {
+        if (!c.historyMessages || !c.historyMessages.length) continue;
+        priorTurns.push({ kind: 'prompt', messages: c.historyMessages });
       }
-      if (c.kind === 'markdown') {
-        return { role: 'user', content: `Notebook context:\n${c.source}` };
-      }
-      if (c.kind === 'prompt') {
-        const reply = (c.transcript || []).filter((b) => b.kind === 'text').map((b) => b.text).join('\n');
-        return [
-          { role: 'user', content: c.source },
-          ...(reply ? [{ role: 'assistant', content: reply }] : []),
-        ];
-      }
-      return null;
-    }).flat().filter(Boolean) : [];
+    }
 
-    // Reset cell state
+    // Reset cell state — clear prior history so a re-run replaces it cleanly.
     runCounterRef.current += 1;
-    updateCell(cell.id, { transcript: [], usage: null, duration: 0, cost: 0, runNumber: runCounterRef.current });
+    updateCell(cell.id, { transcript: [], usage: null, duration: 0, cost: 0, runNumber: runCounterRef.current, historyMessages: null });
 
     const blocks = [];
     const toolNameById = new Map();
+    // Mirrors vscode: excluded prompt cells run standalone (no priors), so
+    // their wire numbers and cost should not affect global session totals.
+    const isExcluded = cell.included === false;
 
     const onEvent = (eventName, data) => {
       reduceTranscript(blocks, eventName, data, toolNameById);
-      // Record running totals
-      if (data.type === 'assistant' && data.message?.usage) {
+      // Live-update the gauge from streamed assistant usage so the bar
+      // moves while the turn is in progress. Skip for excluded runs.
+      if (!isExcluded && data.type === 'assistant' && data.message?.usage) {
         const usage = data.message.usage;
-        const totalIn = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
-        setLastInputTokens(totalIn);
+        const totalContext =
+          (usage.input_tokens || 0)
+          + (usage.cache_creation_input_tokens || 0)
+          + (usage.cache_read_input_tokens || 0)
+          + (usage.output_tokens || 0);
+        if (totalContext) setLastInputTokens(totalContext);
       }
       updateCell(cell.id, { transcript: [...blocks] });
     };
 
     const onEnd = (data) => {
-      if (data.sessionId) setSessionId(data.sessionId);
       const r = blocks.result || {};
       const usage = r.usage;
-      if (usage) {
-        const totalIn = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
-        setLastInputTokens(totalIn);
+      // Final gauge value from the result event — most authoritative.
+      // Includes input + cache_read + cache_creation + output, the full
+      // footprint of the latest non-excluded turn.
+      if (!isExcluded && usage) {
+        const totalContext =
+          (usage.input_tokens || 0)
+          + (usage.cache_creation_input_tokens || 0)
+          + (usage.cache_read_input_tokens || 0)
+          + (usage.output_tokens || 0);
+        if (totalContext) setLastInputTokens(totalContext);
       }
       const turnCost = Number(r.total_cost_usd || 0);
-      if (turnCost) setTotalCost((p) => p + turnCost);
+      // Excluded runs don't accumulate cost into the session total either.
+      if (turnCost && !isExcluded) setTotalCost((p) => p + turnCost);
+      // Capture this turn's stream-json slice for replay on the next run.
+      // Mirrors vscode's ClaudeHistory.messages — these messages (with
+      // parentUuid relinked) become a synthetic prior in future sessions.
+      const historyMessages = extractLastTurnMessages(data.sessionContent || '', cell.source);
       updateCell(cell.id, {
         transcript: [...blocks],
         usage: r.usage || null,
         duration: r.duration_ms || 0,
         cost: turnCost,
+        historyMessages,
       });
       setRunning((p) => { const n = { ...p }; delete n[cell.id]; return n; });
     };
@@ -820,13 +964,13 @@ function App() {
       setRunning((p) => { const n = { ...p }; delete n[cell.id]; return n; });
     };
 
-    setRunning((p) => ({ ...p, [cell.id]: 'pending' }));
-    const aborter = await streamRun({
-      sessionId, history: seedHistory, prompt: cell.source,
-      kernelId: kernelIdRef.current, model: cell.model || 'sonnet',
-    }, onEvent, onEnd, onError);
+    const aborter = new AbortController();
     setRunning((p) => ({ ...p, [cell.id]: aborter }));
-  }, [cells, sessionId, running, updateCell]);
+    await streamRun({
+      priorTurns, prompt: cell.source,
+      kernelId: kernelIdRef.current, model: cell.model || 'sonnet',
+    }, onEvent, onEnd, onError, aborter);
+  }, [cells, running, updateCell]);
 
   const cancelRun = useCallback((cellId) => {
     const a = running[cellId];
@@ -834,172 +978,20 @@ function App() {
     setRunning((p) => { const n = { ...p }; delete n[cellId]; return n; });
   }, [running]);
 
-  // ----- sessions list -----
-  const loadSessions = useCallback(async () => {
-    try {
-      const data = await api('/api/sessions');
-      setSessions(data); setShowSessions(true);
-    } catch { setError('Server not running. Start with: python3 server.py'); }
-  }, []);
-
-  const loadSession = useCallback(async (sid) => {
-    try {
-      const data = await api('/api/session/' + sid);
-      const messages = parseSessionJSONL(data.content);
-      // Reduce session messages into prompt cells (one per user turn) with
-      // attached transcripts. Python turns from prior runs are not
-      // reconstructed — the user can start adding new cells beneath.
-      const turnCells = [];
-      const toolNameById = new Map();
-      let cur = null;
-      for (const msg of messages) {
-        if (msg.type === 'user' && !msg.isMeta) {
-          if (cur) turnCells.push(cur);
-          const content = msg.message?.content;
-          const text = typeof content === 'string' ? content : '';
-          cur = newCell('prompt');
-          cur.source = text;
-          cur.transcript = [];
-          continue;
-        }
-        if (!cur) continue;
-        if (msg.type === 'assistant') {
-          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
-        } else if (msg.type === 'user' && msg.isMeta) {
-          // tool_result
-          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
-        }
-      }
-      if (cur) turnCells.push(cur);
-      setCells(turnCells.length ? turnCells : [newCell('python')]);
-      setSessionId(data.sessionId);
-      setShowSessions(false);
-      setError('');
-    } catch (e) { setError('Failed to load session: ' + e.message); }
-  }, []);
-
-  const handleFileLoad = useCallback((e) => {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const messages = parseSessionJSONL(ev.target.result);
-      const turnCells = [];
-      const toolNameById = new Map();
-      let cur = null;
-      for (const msg of messages) {
-        if (msg.type === 'user' && !msg.isMeta) {
-          if (cur) turnCells.push(cur);
-          const content = msg.message?.content;
-          const text = typeof content === 'string' ? content : '';
-          cur = newCell('prompt');
-          cur.source = text;
-          cur.transcript = [];
-          continue;
-        }
-        if (!cur) continue;
-        if (msg.type === 'assistant') {
-          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
-        } else if (msg.type === 'user' && msg.isMeta) {
-          reduceTranscript(cur.transcript, 'event', msg, toolNameById);
-        }
-      }
-      if (cur) turnCells.push(cur);
-      setCells(turnCells.length ? turnCells : [newCell('python')]);
-      const idMatch = file.name.match(/([a-f0-9-]{36})\.jsonl$/);
-      if (idMatch) setSessionId(idMatch[1]);
-    };
-    reader.readAsText(file); e.target.value = '';
-  }, []);
-
-  // ----- delete turns -----
-  // For a prompt-cell-driven UX, "delete turns" still means remove turns from
-  // the on-disk session. Surface this as a confirmation that takes the indices
-  // of currently EXCLUDED prompt cells (one click pruning).
-  const handlePruneExcluded = useCallback(async () => {
-    if (!sessionId) return;
-    const promptCells = cells.filter((c) => c.kind === 'prompt');
-    const excludedIndices = promptCells.map((c, i) => c.included === false ? i : -1).filter((i) => i >= 0);
-    if (excludedIndices.length === 0) { setError('No excluded prompt cells to prune.'); return; }
-    try {
-      const data = await api('/api/delete-turns', {
-        method: 'POST',
-        body: JSON.stringify({ sessionId, deleteTurnIndices: excludedIndices }),
-      });
-      if (data.error) { setError(data.error); return; }
-      setSessionId(data.sessionId);
-      // Drop excluded prompt cells from the UI
-      setCells((prev) => prev.filter((c) => c.kind !== 'prompt' || c.included !== false));
-      setShowConfirm(false);
-    } catch (e) { setError('Server error during prune: ' + e.message); }
-  }, [sessionId, cells]);
-
-  const resetAll = useCallback(() => {
-    setCells([newCell('python')]);
-    setSessionId(''); setError(''); setTotalCost(0); setLastInputTokens(0);
-    kernelIdRef.current = uuid4();
-  }, []);
-
   const ctxPct = Math.min(100, Math.round((lastInputTokens / contextLimit) * 100));
 
   return (
-    <div className="app">
+    <div className="shell">
+      <FileSidebar kernelId={kernelIdRef.current} running={running} />
+      <div className="app">
       <div className="header">
-        <div>
-          <h1><span>Claude</span> Notebook</h1>
-          {sessionId && <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{sessionId.slice(0, 8)}...</div>}
-        </div>
-        <div className="header-actions">
-          <select className="btn" value={contextLimit} onChange={(e) => setContextLimit(Number(e.target.value))}>
-            <option value={200000}>200k</option>
-            <option value={1000000}>1M</option>
-          </select>
-          <button className="btn" onClick={loadSessions}>Sessions</button>
-          <button className="btn" onClick={() => fileRef.current?.click()}>Load</button>
-          {sessionId && cells.some((c) => c.kind === 'prompt' && c.included === false) && (
-            <button className="btn btn-danger" onClick={() => setShowConfirm(true)}>Prune excluded</button>
-          )}
-          <button className="btn" onClick={resetAll}>New</button>
-          <input ref={fileRef} type="file" className="file-input" accept=".jsonl" onChange={handleFileLoad} />
-        </div>
+        <h1><span>Claude</span> Notebook</h1>
       </div>
 
       {error && (
         <div className="error-bar">
           <span>{error}</span>
           <button onClick={() => setError('')}>×</button>
-        </div>
-      )}
-
-      {showSessions && (
-        <div className="modal-overlay" onClick={() => setShowSessions(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Recent Sessions</h3>
-            <div className="session-list">
-              {sessions.map((s) => (
-                <div key={s.id} className="session-item" onClick={() => loadSession(s.id)}>
-                  <div style={{ overflow: 'hidden' }}>
-                    <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 460 }}>{s.preview}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>{s.id}</div>
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{s.turns} turns</div>
-                </div>
-              ))}
-              {sessions.length === 0 && <p style={{ color: 'var(--text-dim)', textAlign: 'center', padding: 16 }}>No sessions found</p>}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showConfirm && (
-        <div className="modal-overlay" onClick={() => setShowConfirm(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Prune excluded prompt turns?</h3>
-            <p>Removes excluded prompt cells from the on-disk session and re-links the parent chain. The original session file is preserved.</p>
-            <div className="modal-actions">
-              <button className="btn" onClick={() => setShowConfirm(false)}>Cancel</button>
-              <button className="btn btn-danger" onClick={handlePruneExcluded}>Prune</button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1039,15 +1031,128 @@ function App() {
         )}
       </div>
 
-      <div className="status-bar">
-        <span className="item"><span className="label">Context:</span> <span className="val">{ctxPct}%</span></span>
-        <span className="item" title={`${lastInputTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens`}>
-          <span className="label">Tokens:</span> <span className="val">{formatTokens(lastInputTokens)} / {formatTokens(contextLimit)}</span>
+      <SessionWidget
+        ctxPct={ctxPct}
+        lastInputTokens={lastInputTokens}
+        contextLimit={contextLimit}
+        totalCost={totalCost}
+        cells={cells}
+      />
+      </div>
+    </div>
+  );
+}
+
+function FileSidebar({ kernelId, running }) {
+  const [files, setFiles] = useState([]);
+  const [workspace, setWorkspace] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const refresh = useCallback(async () => {
+    if (!kernelId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(API + '/api/files?kernelId=' + encodeURIComponent(kernelId));
+      const data = await res.json();
+      if (data.error) {
+        setErr(data.error);
+        setFiles([]);
+      } else {
+        setErr('');
+        setFiles(data.files || []);
+        setWorkspace(data.workspace || '');
+      }
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [kernelId]);
+
+  // Initial load + auto-refresh whenever a run finishes (running map shrinks
+  // back to empty). Files often only appear after Bash/Edit/Write tool calls,
+  // so this saves the user from manually clicking refresh.
+  useEffect(() => { refresh(); }, [refresh]);
+  const runningCount = Object.keys(running).length;
+  const prevRunning = useRef(0);
+  useEffect(() => {
+    if (prevRunning.current > 0 && runningCount === 0) refresh();
+    prevRunning.current = runningCount;
+  }, [runningCount, refresh]);
+
+  const wsLabel = workspace ? workspace.split('/').slice(-2).join('/') : '(no workspace yet)';
+  return (
+    <aside className="file-sidebar">
+      <div className="sb-header">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="title">Files</div>
+          <span className="ws-path" title={workspace}>{wsLabel}</span>
+        </div>
+        <button className="sb-refresh" onClick={refresh} disabled={loading} title="Refresh">
+          {loading ? '…' : '↻'}
+        </button>
+      </div>
+      <div className="sb-list">
+        {err && <div className="sb-empty" style={{ color: 'var(--red)' }}>{err}</div>}
+        {!err && files.length === 0 && (
+          <div className="sb-empty">{loading ? 'Loading…' : 'Workspace is empty'}</div>
+        )}
+        {files.map((f) => {
+          const depth = f.path.split('/').length - 1;
+          return (
+            <div key={f.path} className={`sb-item ${f.type}`}
+                 style={{ paddingLeft: 12 + depth * 12 }}
+                 title={f.path}>
+              <span>{f.type === 'dir' ? '▸' : '·'}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {f.path.split('/').pop()}
+              </span>
+              {f.type === 'file' && f.size != null && (
+                <span className="size">{formatSize(f.size)}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
+function formatSize(n) {
+  if (n < 1024) return n + 'B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + 'K';
+  return (n / 1024 / 1024).toFixed(1) + 'M';
+}
+
+function SessionWidget({ ctxPct, lastInputTokens, contextLimit, totalCost, cells }) {
+  let included = 0, excluded = 0;
+  for (const c of cells) {
+    if (c.kind !== 'prompt' && c.kind !== 'python') continue;
+    if (c.included === false) excluded++; else included++;
+  }
+  const ctxClass = ctxPct >= 90 ? 'danger' : ctxPct >= 70 ? 'warn' : '';
+  return (
+    <div className="session-widget">
+      <div className="row ctx-row">
+        <div className="ctx-top">
+          <span className="label">Context</span>
+          <span className="val" title={`${lastInputTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens`}>
+            {ctxPct}% · {formatTokens(lastInputTokens)} / {formatTokens(contextLimit)}
+          </span>
+        </div>
+        <div className="ctx-bar"><div className={`ctx-bar-fill ${ctxClass}`} style={{ width: ctxPct + '%' }} /></div>
+      </div>
+      <div className="row">
+        <span className="label">Turns</span>
+        <span className="val">
+          {included} included
+          {excluded > 0 && <span className="excluded">· {excluded} excluded</span>}
         </span>
-        <span className="item"><span className="label">Cost:</span> <span className="val">${totalCost.toFixed(4)}</span></span>
-        <span className="spacer" />
-        <span className="item"><span className="label">Cells:</span> <span className="val">{cells.length}</span></span>
-        {sessionId && <span className="item"><span className="label">Session:</span> <span className="val">{sessionId.slice(0,8)}</span></span>}
+      </div>
+      <div className="row">
+        <span className="label">Cost</span>
+        <span className="val cost">${totalCost.toFixed(4)}</span>
       </div>
     </div>
   );

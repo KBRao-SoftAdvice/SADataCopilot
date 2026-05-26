@@ -10,7 +10,12 @@ const extensionConfig = {
     filename: 'extension.js',
     libraryTarget: 'commonjs2',
   },
-  externals: { vscode: 'commonjs vscode' },
+  externals: {
+    vscode: 'commonjs vscode',
+    // Copilot SDK spawns the bundled `copilot` CLI as a subprocess; bundling
+    // it via webpack mangles the resolved CLI path. Ship via node_modules.
+    '@github/copilot-sdk': 'commonjs @github/copilot-sdk',
+  },
   resolve: { extensions: ['.ts', '.js'] },
   module: {
     rules: [{ test: /\.ts$/, use: 'ts-loader', exclude: /node_modules/ }],

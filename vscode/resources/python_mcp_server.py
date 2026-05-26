@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""
-Standalone MCP stdio server for the Claude Notebook (browser).
+"""Stdio MCP server bundled with the VS Code extension.
 
-Spawned as a child of `claude` via --mcp-config. Declares the python_run tool
-and forwards each call back into the live notebook kernel via the parent
-HTTP bridge.
+Spawned as a child of `claude` via --mcp-config when the user runs a prompt
+cell with the Claude backend. Declares a single `python_run` tool and forwards
+each call back into the live notebook kernel via a localhost HTTP bridge owned
+by the extension.
 
 Configuration via env (set when spawning claude):
-  KERNEL_BRIDGE_URL    e.g. http://127.0.0.1:8787
+  KERNEL_BRIDGE_URL    e.g. http://127.0.0.1:54321
   KERNEL_BRIDGE_TOKEN  one-time bearer token scoped to this run
 """
 
@@ -62,7 +62,7 @@ def call_bridge(code):
         raise RuntimeError("Kernel bridge not configured (missing env)")
     body = json.dumps({"code": code}).encode("utf-8")
     req = urllib.request.Request(
-        BRIDGE_URL.rstrip("/") + "/api/kernel-bridge/run",
+        BRIDGE_URL.rstrip("/") + "/run",
         data=body,
         headers={
             "Content-Type": "application/json",
@@ -87,7 +87,7 @@ def handle(message):
     if method == "initialize":
         respond(msg_id, {
             "protocolVersion": "2024-11-05",
-            "serverInfo": {"name": "claude-notebook-kernel", "version": "0.1.0"},
+            "serverInfo": {"name": "copilot-notebook-kernel", "version": "0.1.0"},
             "capabilities": {"tools": {}},
         })
         return

@@ -1,8 +1,0 @@
-{
-  "argv": ["python3", "-m", "claude_kernel", "-f", "{connection_file}"],
-  "display_name": "Claude Code",
-  "language": "python",
-  "metadata": {
-    "debugger": false
-  }
-}

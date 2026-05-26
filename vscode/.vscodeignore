@@ -1,8 +1,19 @@
 src/**
 renderer/**
-node_modules/**
 .vscode/**
 tsconfig*.json
 webpack.config.js
 *.map
 test/**
+
+# Strip dev/devDependency-only modules from the .vsix; keep runtime deps
+# (@anthropic-ai/claude-agent-sdk, zod, …) so externalized requires resolve.
+node_modules/.bin/**
+node_modules/.cache/**
+node_modules/typescript/**
+node_modules/webpack/**
+node_modules/webpack-cli/**
+node_modules/ts-loader/**
+node_modules/css-loader/**
+node_modules/style-loader/**
+node_modules/@types/**

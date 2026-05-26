@@ -19,11 +19,22 @@ venv/
 
 # Build output
 vscode/out/
-jupyter/claude_cell_toggle/lib/
-jupyter/claude_cell_toggle/claude_cell_toggle/labextension/
+
+# Local runtime / playground
+.bench/
+browser/.workspaces/
+*.copilot-history.json
+trial*.ipynb
+vscode/test.ipynb
+test.txt
+*.xlsx
 
 # Jupyter
 .ipynb_checkpoints/
+Untitled*.ipynb
+
+# TypeScript incremental build info
+*.tsbuildinfo
 
 # OS / editor
 .DS_Store
