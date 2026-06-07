@@ -161,8 +161,8 @@ export function getPromptModel(cell: vscode.NotebookCell, backend: BackendId): s
 
 export function getCopilotCellModel(cell: vscode.NotebookCell): CopilotCellModel {
   const meta = cell.metadata?.[METADATA_MODEL];
-  if (meta === 'gpt-5.5') return 'gpt-5.5';
-  return 'gpt-5-mini';
+  if (meta === 'gpt-5-mini') return 'gpt-5-mini';
+  return 'gpt-5.5';
 }
 
 export function getReasoningEffort(cell: vscode.NotebookCell): ReasoningEffortChoice {

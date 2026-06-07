@@ -39,20 +39,37 @@ export function buildStreamSink(
   setTranscript: (html: string) => void,
   getTranscript: () => string
 ): PromptStreamSink {
+  let lastBlockKind: 'intent' | 'other' | undefined;
+  let lastIntentText = '';
+
   const replace = async (): Promise<void> => {
     await execution.replaceOutput(new vscode.NotebookCellOutput([
       vscode.NotebookCellOutputItem.text(wrapTranscript(getTranscript()), 'text/html')
     ]));
   };
-  const append = async (html: string): Promise<void> => {
+  const appendRaw = async (html: string): Promise<void> => {
     setTranscript(getTranscript() + html);
     await replace();
   };
+  const append = async (html: string): Promise<void> => {
+    lastBlockKind = 'other';
+    await appendRaw(html);
+  };
+  const appendIntent = async (text: string): Promise<void> => {
+    const normalized = text.trim();
+    if (!normalized) return;
+    if (lastBlockKind === 'intent' && normalized === lastIntentText) return;
+    lastBlockKind = 'intent';
+    lastIntentText = normalized;
+    await appendRaw(renderIntentHtml(normalized));
+  };
+
   return {
     async appendAssistantText(text) { await append(renderAssistantTextHtml(text)); },
     async appendToolUse(toolName, input) {
       if (toolName === 'TodoWrite') await append(renderTodoWriteHtml(input));
       else if (toolName === 'Task') await append(renderTaskHtml(input));
+      else if (toolName === 'report_intent') await appendIntent(inlineToolValue(toolName, input));
       else if (INLINE_TOOLS[toolName]) await append(renderInlineToolHtml(toolName, input));
       else if (CODE_TOOLS.has(toolName)) await append(renderCodeToolUseHtml(toolName, input));
       else await append(renderToolUseHtml(toolName, input));
@@ -61,7 +78,7 @@ export function buildStreamSink(
     async appendToolResult(result) { await append(renderToolResultHtml(result)); },
     async appendError(text) { await append(renderErrorHtml(text)); },
     async appendReasoning(text) { await append(renderReasoningHtml(text)); },
-    async appendIntent(text) { await append(renderIntentHtml(text)); },
+    async appendIntent(text) { await appendIntent(text); },
     async appendPermission(kind, summary, decision) {
       await append(renderPermissionHtml(kind, summary, decision));
     },
@@ -227,14 +244,7 @@ export function renderInlineToolHtml(toolName: string, toolInput: unknown): stri
   const tint = meta?.tint || '#f5f3ff';
   const fg = meta?.fg || '#4c1d95';
   const label = meta?.label || toolName;
-  let value = '';
-  if (isRecord(toolInput) && meta) {
-    for (const f of meta.field) {
-      const v = toolInput[f];
-      if (typeof v === 'string' && v) { value = v; break; }
-    }
-  }
-  if (!value) value = stringifyContent(toolInput);
+  const value = inlineToolValue(toolName, toolInput);
   return renderToolFrame({
     border,
     tint,
@@ -242,6 +252,17 @@ export function renderInlineToolHtml(toolName: string, toolInput: unknown): stri
     label,
     body: renderTintedPre(value, tint, fg),
   });
+}
+
+function inlineToolValue(toolName: string, toolInput: unknown): string {
+  const meta = INLINE_TOOLS[toolName];
+  if (isRecord(toolInput) && meta) {
+    for (const f of meta.field) {
+      const v = toolInput[f];
+      if (typeof v === 'string' && v) return v;
+    }
+  }
+  return stringifyContent(toolInput);
 }
 
 export function renderTodoWriteHtml(toolInput: unknown): string {

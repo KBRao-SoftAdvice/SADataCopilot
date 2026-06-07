@@ -60,11 +60,11 @@ export class CopilotNotebookController implements vscode.Disposable {
     this._controller = vscode.notebooks.createNotebookController(
       'copilot-notebook-controller',
       'jupyter-notebook',
-      'Copilot Notebook'
+      'SADataCopilot'
     );
     this._controller.supportedLanguages = ['python', 'copilot-prompt', 'markdown', 'plaintext', 'shellscript', 'diff'];
-    this._controller.description = 'Routes notebook cells to Python or Copilot';
-    this._controller.detail = 'Code cells run as Python; + Prompt cells run through Copilot.';
+    this._controller.description = 'SADataCopilot — routes notebook cells to Python or an LLM agent';
+    this._controller.detail = 'Code cells run as Python; + Prompt cells run through the configured agent.';
     this._controller.executeHandler = (cells, notebook) => this._executeAll(cells, notebook);
   }
 

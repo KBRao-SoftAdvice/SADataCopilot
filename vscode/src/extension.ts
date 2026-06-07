@@ -54,7 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
       notebookController.reset();
       statusBar.refresh();
       vscode.window.showInformationMessage(
-        'Copilot backend changed — session state cleared for all notebooks.'
+        'SADataCopilot: backend changed — session state cleared for all notebooks.'
       );
     })
   );
@@ -88,7 +88,10 @@ export function activate(context: vscode.ExtensionContext): void {
       );
       const backend = getNotebookBackend(editor.notebook);
       if (backend === 'copilot') {
-        cellData.metadata = { [METADATA_MODEL]: 'gpt-5-mini' };
+        cellData.metadata = {
+          [METADATA_MODEL]: 'gpt-5.5',
+          [METADATA_REASONING_EFFORT]: 'medium',
+        };
       } else {
         cellData.metadata = { [METADATA_MODEL]: 'sonnet' };
       }
@@ -146,13 +149,13 @@ export function activate(context: vscode.ExtensionContext): void {
         modelId: 'gpt-5-mini' | 'gpt-5.5';
         effort?: 'medium' | 'high' | 'xhigh';
       };
-      const currentModel = cell.metadata?.[METADATA_MODEL] === 'gpt-5.5' ? 'gpt-5.5' : 'gpt-5-mini';
+      const currentModel = cell.metadata?.[METADATA_MODEL] === 'gpt-5-mini' ? 'gpt-5-mini' : 'gpt-5.5';
       const currentEffort = cell.metadata?.[METADATA_REASONING_EFFORT];
       const options: CopilotPick[] = [
-        { label: 'GPT-5 mini',          description: 'Default — fast & cheap',         modelId: 'gpt-5-mini' },
-        { label: 'GPT-5.5 · Medium',    description: 'Balanced reasoning',             modelId: 'gpt-5.5', effort: 'medium' },
+        { label: 'GPT-5.5 · Medium',    description: 'Default — balanced reasoning',   modelId: 'gpt-5.5', effort: 'medium' },
         { label: 'GPT-5.5 · High',      description: 'More reasoning, slower',         modelId: 'gpt-5.5', effort: 'high'   },
         { label: 'GPT-5.5 · XHigh',     description: 'Maximum reasoning',              modelId: 'gpt-5.5', effort: 'xhigh'  },
+        { label: 'GPT-5 mini',          description: 'Fast & cheap',                   modelId: 'gpt-5-mini' },
       ];
       const currentLabel = options.find(
         (o) => o.modelId === currentModel && o.effort === (currentModel === 'gpt-5.5' ? currentEffort : undefined)
@@ -208,7 +211,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot.resetSession', () => {
       notebookController.reset();
-      vscode.window.showInformationMessage('Copilot session state cleared');
+      vscode.window.showInformationMessage('SADataCopilot: session state cleared');
     })
   );
 

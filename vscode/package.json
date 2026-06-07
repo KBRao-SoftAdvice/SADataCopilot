@@ -1,15 +1,22 @@
 {
-  "name": "copilot-notebook",
-  "displayName": "Copilot Notebook",
-  "description": "VS Code extension for Copilot SDK Jupyter kernel — prompt cells, context tracking, tool rendering",
-  "version": "0.2.0",
-  "publisher": "copilot-kernel",
+  "name": "sadatacopilot",
+  "displayName": "SADataCopilot",
+  "description": "Notebook prompt cells with a shared Python kernel — supports GitHub Copilot, Claude, and Cursor agents.",
+  "version": "0.2.2",
+  "publisher": "SoftAdvice",
+  "icon": "SAlogo.png",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "Notebooks"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KBRao-SoftAdvice/SADataCopilot.git",
+    "directory": "vscode"
+  },
+  "license": "MIT",
   "activationEvents": [
     "onNotebook:jupyter-notebook"
   ],
@@ -57,20 +64,20 @@
       },
       {
         "command": "copilot.pickModel",
-        "title": "Copilot: Pick Model"
+        "title": "SADataCopilot: Pick Model"
       },
       {
         "command": "copilot.toggleCellInclusion",
-        "title": "Copilot: Toggle Inclusion"
+        "title": "SADataCopilot: Toggle Inclusion"
       },
       {
         "command": "copilot.resetSession",
-        "title": "Copilot: Reset Session"
+        "title": "SADataCopilot: Reset Session"
       },
       {
         "command": "copilot.openBackendSetting",
         "title": "Open Backend Setting",
-        "category": "Copilot",
+        "category": "SADataCopilot",
         "icon": "$(server-process)"
       }
     ],
@@ -83,13 +90,27 @@
       ]
     },
     "configuration": {
-      "title": "Copilot Notebook",
+      "title": "SADataCopilot",
       "properties": {
         "copilotNotebook.backend": {
           "type": "string",
-          "enum": ["copilot", "claude", "cursor"],
+          "enum": [
+            "copilot",
+            "claude",
+            "cursor"
+          ],
           "default": "copilot",
           "description": "Which agent backend executes prompt cells. 'copilot' uses the GitHub Copilot SDK with default credentials; per-cell picker offers GPT-5 mini (default) or GPT-5.5 with Medium/High/XHigh reasoning effort. 'claude' shells out to the `claude -p` CLI. 'cursor' shells out to the Cursor `agent -p` CLI."
+        },
+        "copilotNotebook.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional. If set (or `$OPENAI_API_KEY` is exported in the environment), the Copilot backend uses BYOK mode and routes model calls directly to `copilotNotebook.openaiBaseUrl` instead of GitHub Copilot's credential-backed endpoint. Matches the browser notebook's behavior."
+        },
+        "copilotNotebook.openaiBaseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "markdownDescription": "Base URL for OpenAI-compatible BYOK requests. Used only when `copilotNotebook.openaiApiKey` (or `$OPENAI_API_KEY`) is present."
         }
       }
     }
@@ -110,7 +131,14 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
-    "@github/copilot-sdk": "^1.0.0-beta.4",
     "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@github/copilot-sdk": "^1.0.0-beta.4"
+  },
+  "peerDependenciesMeta": {
+    "@github/copilot-sdk": {
+      "optional": true
+    }
   }
 }

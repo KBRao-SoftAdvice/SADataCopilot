@@ -4,19 +4,149 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
-import {
-  CopilotClient,
-  approveAll,
-  defineTool,
-  type CopilotSession,
-  type SessionEvent,
+import { createRequire } from 'module';
+
+// Webpack rewrites every `require()` call it can statically detect into
+// its own runtime — even with /* webpackIgnore */ comments, since ts-loader
+// drops those before webpack sees the AST. createRequire() builds a pristine
+// Node require that webpack can't intercept; all dynamic SDK lookups go
+// through this.
+const nodeRequire = createRequire(__filename);
+import type {
+  CopilotClient as CopilotClientType,
+  CopilotSession,
+  SessionEvent,
 } from '@github/copilot-sdk';
 
 // The SDK declares this type internally but doesn't re-export it from the
 // package root. Mirror the literal union here so we don't have to dig into
 // dist/types.js, which webpack would refuse to resolve.
 type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
-import { z } from 'zod';
+
+// SDK + the GitHub Copilot CLI are not bundled in the .vsix (they ship 250+ MB
+// of multi-platform native binaries). Resolve them lazily — only when the
+// Copilot backend is actually selected — and surface a clear install hint if
+// the user hasn't installed the GitHub Copilot CLI separately.
+//
+// We can't import zod statically either: zod is a transitive dependency of the
+// SDK, which is itself excluded from the package. require()-ing it from the
+// extension host walks the user's globally-installed npm tree only when the
+// SDK is also present.
+type SdkExports = typeof import('@github/copilot-sdk');
+type ZodExports = typeof import('zod');
+
+const SDK_INSTALL_HINT =
+  'The Copilot backend requires the GitHub Copilot CLI. Install it with ' +
+  '`npm install -g @github/copilot`, then reload VS Code. ' +
+  'Alternatively, switch the backend to `claude` or `cursor` in Settings ' +
+  '(`copilotNotebook.backend`).';
+
+let _sdk: SdkExports | undefined;
+let _zod: ZodExports | undefined;
+let _globalNpmRoots: string[] | undefined;
+
+/** Candidate global npm roots. We can't always rely on `npm root -g` because
+ * VS Code launched from Spotlight/Dock has a stripped PATH that won't include
+ * Homebrew/nvm bin dirs. So we shell out *and* fall back to a hardcoded list
+ * of common prefixes. Returns all candidates that exist on disk. */
+function globalNpmRoots(): string[] {
+  if (_globalNpmRoots !== undefined) return _globalNpmRoots;
+  const candidates: string[] = [];
+  // 1. Ask npm directly. Try a few candidate locations so a broken PATH in
+  //    the extension host doesn't sabotage the lookup.
+  const npmCandidates = [
+    'npm',
+    '/opt/homebrew/bin/npm',
+    '/usr/local/bin/npm',
+    '/usr/bin/npm',
+  ];
+  for (const cmd of npmCandidates) {
+    try {
+      const out = execFileSync(cmd, ['root', '-g'], {
+        encoding: 'utf8',
+        timeout: 5000,
+      }).trim();
+      if (out) {
+        candidates.push(out);
+        break;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  // 2. Hardcoded common prefixes — covers Homebrew (arm + x86), system, nvm.
+  const homeDir = os.homedir();
+  candidates.push(
+    '/opt/homebrew/lib/node_modules',
+    '/usr/local/lib/node_modules',
+    '/usr/lib/node_modules',
+    path.join(homeDir, '.npm-global', 'lib', 'node_modules'),
+    path.join(homeDir, '.local', 'share', 'npm', 'lib', 'node_modules'),
+  );
+  // 3. Filter to ones that actually exist + dedupe.
+  const seen = new Set<string>();
+  _globalNpmRoots = candidates.filter((c) => {
+    if (seen.has(c) || !fs.existsSync(c)) return false;
+    seen.add(c);
+    return true;
+  });
+  return _globalNpmRoots;
+}
+
+/** require() a module by name, falling back to `npm root -g` if the
+ * extension's own resolver can't find it. Globally-installed packages
+ * live outside any of the dirs Node walks from out/extension.js, so we
+ * resolve them explicitly via require.resolve(name, { paths: [globalRoot] }). */
+/** require() a file by absolute path, bypassing webpack's bundler. */
+function requireAbs<T>(absPath: string): T {
+  return nodeRequire(absPath) as T;
+}
+
+function loadSdk(): SdkExports {
+  if (_sdk) return _sdk;
+  const tried: string[] = [];
+  // 1. Try standalone `@github/copilot-sdk` from each global root.
+  for (const root of globalNpmRoots()) {
+    const sdkRoot = path.join(root, '@github', 'copilot-sdk');
+    tried.push(sdkRoot);
+    if (fs.existsSync(sdkRoot)) {
+      try {
+        _sdk = requireAbs<SdkExports>(sdkRoot);
+        return _sdk;
+      } catch {
+        // Fall through to other lookups.
+      }
+    }
+  }
+  // 2. Try the SDK that ships *inside* @github/copilot — that's where it
+  //    lands after `npm install -g @github/copilot`, since the CLI vendors
+  //    a private copy of the SDK rather than depending on the public package.
+  for (const root of globalNpmRoots()) {
+    const bundled = path.join(root, '@github', 'copilot', 'copilot-sdk', 'index.js');
+    tried.push(bundled);
+    if (fs.existsSync(bundled)) {
+      try {
+        _sdk = requireAbs<SdkExports>(bundled);
+        return _sdk;
+      } catch (err) {
+        throw new Error(`SDK at ${bundled} failed to load: ${err}`);
+      }
+    }
+  }
+  const summary = tried.length
+    ? `Tried: ${tried.join(', ')}.`
+    : 'No global npm prefix found.';
+  throw new Error(SDK_INSTALL_HINT + ' ' + summary);
+}
+
+function loadZod(): ZodExports {
+  if (_zod) return _zod;
+  // zod is a regular static dep — webpack inlines this require() into the
+  // bundle, so no runtime lookup happens.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  _zod = require('zod') as ZodExports;
+  return _zod;
+}
 import {
   NotebookBackend,
   PromptRunInput,
@@ -60,7 +190,7 @@ interface CopilotHistory {
  */
 export class CopilotBackend implements NotebookBackend {
   readonly id = 'copilot' as const;
-  private _client: CopilotClient | undefined;
+  private _client: CopilotClientType | undefined;
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -82,7 +212,9 @@ export class CopilotBackend implements NotebookBackend {
     };
 
     const repl = input.repl;
-    const pythonRunTool = defineTool(KERNEL_TOOL_NAME, {
+    const sdk = loadSdk();
+    const z = loadZod().z;
+    const pythonRunTool = sdk.defineTool(KERNEL_TOOL_NAME, {
       description:
         'Run Python code in the notebook kernel and return stdout/stderr. ' +
         'Variables defined in user cells are visible; side effects persist.',
@@ -107,14 +239,26 @@ export class CopilotBackend implements NotebookBackend {
     let cancelSub: vscode.Disposable | undefined;
 
     try {
-      session = await client.resumeSession(sessionId, {
+      const byok = readByokConfig();
+      const resumeOpts: Record<string, unknown> = {
         model,
         reasoningEffort,
         tools: [pythonRunTool],
-        onPermissionRequest: approveAll,
+        onPermissionRequest: sdk.approveAll,
         workingDirectory: input.cwd,
         streaming: true,
-      });
+      };
+      if (byok) {
+        // BYOK: route model calls directly to OpenAI (or compatible endpoint)
+        // instead of through GitHub Copilot's credential-backed proxy. Matches
+        // the browser notebook's sidecar behavior.
+        resumeOpts.provider = {
+          type: 'openai',
+          baseUrl: byok.baseUrl,
+          apiKey: byok.apiKey,
+        };
+      }
+      session = await client.resumeSession(sessionId, resumeOpts as Parameters<typeof client.resumeSession>[1]);
       cancelSub = input.cancellationToken.onCancellationRequested(() => {
         result.cancelled = true;
         session?.abort().catch(() => { /* ignore */ });
@@ -186,7 +330,7 @@ export class CopilotBackend implements NotebookBackend {
     }
   }
 
-  private async _getClient(): Promise<CopilotClient> {
+  private async _getClient(): Promise<CopilotClientType> {
     if (this._client) return this._client;
     // Use default Copilot credentials (the CLI's stored auth) when GITHUB_TOKEN
     // is not explicitly set. Passing undefined lets the SDK pick that path up.
@@ -212,13 +356,38 @@ export class CopilotBackend implements NotebookBackend {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       COPILOT_CLI_REAL_PATH: realCliPath,
+      // The Copilot CLI's index.js is a two-process loader: by default it
+      // re-spawns process.execPath to run app.js, which means our shim only
+      // patches the parent and the grandchild lands back in commander's
+      // electron-mode trap ("too many arguments. Expected 0 arguments but
+      // got 1."). Setting COPILOT_RUN_APP=1 makes the loader inline app.js
+      // via dynamic import instead of spawning a child, so the shim's
+      // process.versions.electron deletion stays in scope.
+      COPILOT_RUN_APP: '1',
     };
-    this._client = new CopilotClient({
+    const sdk = loadSdk();
+    // The SDK reshaped its CLI-path option around v1.0.0-beta.5: older builds
+    // accept `cliPath` directly, newer builds want `connection: RuntimeConnection.forStdio({path})`
+    // and silently ignore a top-level `cliPath`. The CLI shipped inside
+    // @github/copilot is newer than the standalone @github/copilot-sdk we
+    // depend on for types, so detect at runtime and pick whichever the loaded
+    // build actually honors. Without the new path, the SDK skipped our shim
+    // entirely and the grandchild process landed back in commander's
+    // electron-mode trap ("too many arguments. Expected 0 arguments but got 1.").
+    const sdkAny = sdk as unknown as {
+      RuntimeConnection?: { forStdio: (opts: { path: string }) => unknown };
+    };
+    const clientOptions: Record<string, unknown> = {
       gitHubToken,
       logLevel: 'error',
       env,
-      cliPath: shimPath,
-    });
+    };
+    if (sdkAny.RuntimeConnection?.forStdio) {
+      clientOptions.connection = sdkAny.RuntimeConnection.forStdio({ path: shimPath });
+    } else {
+      clientOptions.cliPath = shimPath;
+    }
+    this._client = new sdk.CopilotClient(clientOptions as ConstructorParameters<typeof sdk.CopilotClient>[0]);
     await this._client.start();
     return this._client;
   }
@@ -350,7 +519,7 @@ export class CopilotBackend implements NotebookBackend {
     return new Set(seeded.map((e) => e.id));
   }
 
-  private async _cleanup(client: CopilotClient, sessionId: string): Promise<void> {
+  private async _cleanup(client: CopilotClientType, sessionId: string): Promise<void> {
     // SDK delete first so the CLI releases any handles.
     try { await client.deleteSession(sessionId); } catch { /* ignore */ }
     // Then ensure the on-disk state is gone, even if deleteSession was a no-op.
@@ -566,7 +735,7 @@ export class CopilotBackend implements NotebookBackend {
     }
   }
 
-  private async _getContextWindow(client: CopilotClient, modelId: string): Promise<number> {
+  private async _getContextWindow(client: CopilotClientType, modelId: string): Promise<number> {
     try {
       const models = await client.listModels();
       const info = models.find((m) => m.id === modelId);
@@ -585,21 +754,26 @@ export class CopilotBackend implements NotebookBackend {
  * package.json, so a normal require.resolve fails and webpack's static
  * analyzer also rejects it. Walk up from this file looking for
  * node_modules/@github/copilot/index.js — same lookup the SDK does internally.
+ * If the bundle-relative walk fails, fall back to `npm root -g` so a globally
+ * installed `@github/copilot` is also picked up (the published .vsix doesn't
+ * ship its own copy; users opt in via `npm install -g @github/copilot`).
  */
 function resolveCopilotCli(): string {
-  const start = __dirname;
-  let dir = start;
+  const candidates: string[] = [];
+  let dir = __dirname;
   for (let i = 0; i < 10; i++) {
-    const candidate = path.join(dir, 'node_modules', '@github', 'copilot', 'index.js');
-    if (fs.existsSync(candidate)) return candidate;
+    candidates.push(path.join(dir, 'node_modules', '@github', 'copilot', 'index.js'));
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error(
-    `Could not locate @github/copilot/index.js starting from ${start}. ` +
-    'Is the @github/copilot package installed?'
-  );
+  for (const root of globalNpmRoots()) {
+    candidates.push(path.join(root, '@github', 'copilot', 'index.js'));
+  }
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error(SDK_INSTALL_HINT + ' Tried: ' + candidates.join(', '));
 }
 
 /**
@@ -646,6 +820,25 @@ function estimateCostUsd(
       + cacheWriteTokens * price.cacheWrite)
     / 1_000_000
   );
+}
+
+/**
+ * Read the user's BYOK config. Returns `null` when the user hasn't set an
+ * API key (in which case the backend falls back to GitHub Copilot's default
+ * credential path, same as before).
+ *
+ * Resolution order:
+ *   1. `copilotNotebook.openaiApiKey` setting
+ *   2. `$OPENAI_API_KEY` environment variable (mirrors the browser sidecar)
+ */
+function readByokConfig(): { apiKey: string; baseUrl: string } | null {
+  const cfg = vscode.workspace.getConfiguration('copilotNotebook');
+  const settingKey = (cfg.get<string>('openaiApiKey') || '').trim();
+  const envKey = (process.env.OPENAI_API_KEY || '').trim();
+  const apiKey = settingKey || envKey;
+  if (!apiKey) return null;
+  const baseUrl = (cfg.get<string>('openaiBaseUrl') || 'https://api.openai.com/v1').replace(/\/$/, '');
+  return { apiKey, baseUrl };
 }
 
 function copilotHome(): string {
@@ -761,9 +954,9 @@ function readNewEvents(sessionId: string, seededIds: Set<string>): CopilotEventR
   return out;
 }
 
-/** Resolve the cell's `model` string to a Copilot model id. Defaults to mini. */
+/** Resolve the cell's `model` string to a Copilot model id. Defaults to gpt-5.5. */
 function pickModel(value: string | undefined): 'gpt-5-mini' | 'gpt-5.5' {
-  return value === 'gpt-5.5' ? 'gpt-5.5' : 'gpt-5-mini';
+  return value === 'gpt-5-mini' ? 'gpt-5-mini' : 'gpt-5.5';
 }
 
 /**

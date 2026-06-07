@@ -145,6 +145,6 @@ export async function saveHistory(
   try {
     await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(data, null, 2)));
   } catch (err) {
-    console.error('Copilot Notebook: failed to write history sidecar', err);
+    console.error('SADataCopilot: failed to write history sidecar', err);
   }
 }
