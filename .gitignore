@@ -19,13 +19,19 @@ venv/
 
 # Build output
 vscode/out/
+vscode/*.vsix
 
 # Local runtime / playground
 .bench/
 browser/.workspaces/
+browser/azure_deploy.md
+browser/launch.md
+browser/server.log
+demo/
 *.copilot-history.json
 trial*.ipynb
 vscode/test.ipynb
+vscode/SAlogo.jpeg
 test.txt
 *.xlsx
 
