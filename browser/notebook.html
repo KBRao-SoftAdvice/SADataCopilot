@@ -3,39 +3,56 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Notebook</title>
+<title>SADataCopilot: Agentic Notebook for Data Analysis</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  /* Jupyter-classic light palette */
+  /* Modern slate + indigo palette. Chrome stays neutral and quiet so the
+     transcript/tool blocks (which keep their original colors) carry the
+     visual weight. One accent (indigo) for interactive affordances. */
   :root {
-    --bg: #ffffff;
-    --surface: #ffffff;
-    --surface-alt: #f5f5f5;
-    --code-bg: #f7f7f7;
+    --bg: #f6f7fb;            /* very soft slate-tinted page */
+    --surface: #ffffff;       /* cards / cells */
+    --surface-alt: #f1f4f9;   /* toolbars, sidebar */
+    --code-bg: #f8fafc;       /* code blocks */
     --output-bg: #ffffff;
-    --border: #cfcfcf;
-    --border-soft: #e5e5e5;
-    --text: #000000;
-    --text-dim: #555555;
-    --accent: #2196f3;       /* Jupyter active-cell blue */
-    --accent-edit: #1976d2;
-    --prompt: #303f9f;       /* In [n]: indigo */
-    --markdown: #607d8b;
-    --green: #2e7d32;
-    --yellow: #f9a825;
-    --red: #d32f2f;
-    --tool-python: #6a1b9a;
-    --tool-bash: #ef6c00;
-    --tool-edit: #1565c0;
-    --tool-write: #2e7d32;
+    --border: #e2e8f0;        /* slate-200 — softer default border */
+    --border-soft: #eef1f6;   /* hairline */
+    --text: #0f172a;          /* slate-900 */
+    --text-dim: #64748b;      /* slate-500 */
+    --text-muted: #94a3b8;    /* slate-400 */
+    --accent: #6366f1;        /* indigo-500 — focused cell rail */
+    --accent-edit: #4f46e5;   /* indigo-600 — buttons, brand */
+    --accent-soft: #eef2ff;   /* indigo-50 — hover bg */
+    --prompt: #4f46e5;        /* indigo-600 — In [n]: gutter */
+    --markdown: #64748b;      /* slate-500 — md tag */
+    --prompt-cell: #7c3aed;   /* violet-600 — prompt-cell tag */
+    --green: #059669;         /* emerald-600 */
+    --yellow: #d97706;        /* amber-600 */
+    --red: #dc2626;           /* red-600 */
+    --red-soft: #fef2f2;      /* red-50 */
+    --tool-python: #7c3aed;
+    --tool-bash:   #d97706;
+    --tool-edit:   #2563eb;
+    --tool-write:  #059669;
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+    --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.08);
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
     background: var(--bg); color: var(--text); min-height: 100vh;
+    font-size: 14px; letter-spacing: -0.005em;
   }
   /* Two-column shell: file sidebar | notebook. The sidebar is a fixed
      column on the left, the notebook keeps its centered max-width feel
@@ -47,71 +64,101 @@
   }
   .file-sidebar {
     border-right: 1px solid var(--border);
-    background: var(--surface-alt);
+    background: var(--surface);
     display: flex; flex-direction: column;
     height: 100vh; position: sticky; top: 0;
     font-size: 12px;
   }
   .file-sidebar .sb-header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 12px; border-bottom: 1px solid var(--border-soft);
-    font-weight: 500;
+    padding: 14px 16px; border-bottom: 1px solid var(--border-soft);
+    font-weight: 600;
   }
-  .file-sidebar .sb-header .title { color: var(--text); }
+  .file-sidebar .sb-header .title {
+    color: var(--text); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-dim);
+  }
   .file-sidebar .sb-header .ws-path {
-    font-family: 'Menlo', 'Consolas', monospace; font-size: 10px;
-    color: var(--text-dim); display: block; margin-top: 2px;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 10px;
+    color: var(--text-muted); display: block; margin-top: 3px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 400; letter-spacing: 0;
   }
   .file-sidebar .sb-list {
-    flex: 1; overflow-y: auto; padding: 6px 0;
+    flex: 1; overflow-y: auto; padding: 8px 0;
   }
   .file-sidebar .sb-empty {
-    padding: 10px 14px; color: var(--text-dim); font-style: italic;
+    padding: 12px 16px; color: var(--text-muted); font-style: italic;
   }
   .file-sidebar .sb-item {
-    display: flex; align-items: center; gap: 6px;
-    padding: 3px 12px; font-family: 'Menlo', 'Consolas', monospace;
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 14px; font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
     color: var(--text); white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis;
+    border-radius: 4px; margin: 0 6px;
+    transition: background 0.12s ease;
   }
-  .file-sidebar .sb-item.dir { color: var(--accent-edit); }
+  .file-sidebar .sb-item:hover { background: var(--surface-alt); }
+  .file-sidebar .sb-item.dir { color: var(--accent-edit); font-weight: 500; }
   .file-sidebar .sb-item .size {
-    margin-left: auto; color: var(--text-dim); font-size: 10px;
+    margin-left: auto; color: var(--text-muted); font-size: 10px;
   }
   .file-sidebar .sb-refresh {
-    background: none; border: 1px solid var(--border); border-radius: 3px;
-    cursor: pointer; padding: 2px 6px; font-size: 11px; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer; padding: 4px 8px; font-size: 11px; color: var(--text-dim);
+    transition: all 0.12s ease;
   }
-  .file-sidebar .sb-refresh:hover { background: var(--surface); }
+  .file-sidebar .sb-refresh:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-edit); }
   .file-sidebar .sb-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* Right padding leaves room for the floating SessionWidget so its
      ~220px box never overlaps cell content at narrow viewports. */
-  .app { width: 100%; max-width: 1400px; margin: 0 auto; padding: 16px 260px 60px 28px; }
+  .app { width: 100%; max-width: 1400px; margin: 0 auto; padding: 24px 280px 80px 36px; }
 
   .header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 8px 12px; background: var(--surface-alt);
-    border: 1px solid var(--border); border-radius: 4px; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 14px;
+    padding: 18px 24px; background: var(--surface);
+    border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+    margin-bottom: 20px; box-shadow: var(--shadow-sm);
   }
-  .header h1 { font-size: 15px; font-weight: 500; color: var(--text); }
-  .header h1 span { color: var(--accent-edit); font-weight: 600; }
-  .header-actions { display: flex; gap: 6px; align-items: center; }
+  .header .brand {
+    font-size: 17px; font-weight: 700; color: var(--text);
+    letter-spacing: -0.02em;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .header .brand::before {
+    content: ''; width: 8px; height: 8px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--prompt-cell));
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .header .divider {
+    width: 1px; height: 18px; align-self: center; background: var(--border);
+  }
+  .header .tagline {
+    font-size: 13px; font-weight: 400; color: var(--text-dim);
+    letter-spacing: 0;
+  }
+  .header-actions { display: flex; gap: 6px; align-items: center; margin-left: auto; }
 
   .btn {
-    padding: 4px 10px; border-radius: 3px; border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
     background: var(--surface); color: var(--text); font-family: inherit;
-    font-size: 12px; cursor: pointer; transition: background 0.1s, border-color 0.1s;
-    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    transition: all 0.12s ease;
+    display: inline-flex; align-items: center; gap: 6px;
   }
-  .btn:hover { background: var(--surface-alt); border-color: #999; }
+  .btn:hover { background: var(--surface-alt); border-color: var(--text-muted); }
+  .btn:active { transform: translateY(0.5px); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-danger { border-color: var(--red); color: var(--red); }
-  .btn-danger:hover { background: #fdecea; }
-  .btn-primary { background: var(--accent-edit); border-color: var(--accent-edit); color: #fff; }
-  .btn-primary:hover { background: #1565c0; }
-  .btn-sm { padding: 2px 7px; font-size: 11px; }
+  .btn-danger:hover { background: var(--red-soft); }
+  .btn-primary {
+    background: var(--accent-edit); border-color: var(--accent-edit); color: #fff;
+    box-shadow: 0 1px 2px rgba(79, 70, 229, 0.2);
+  }
+  .btn-primary:hover { background: #4338ca; border-color: #4338ca; box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25); }
+  .btn-sm { padding: 3px 8px; font-size: 11px; }
   .file-input { display: none; }
 
   .cells { display: flex; flex-direction: column; gap: 0; }
@@ -120,31 +167,41 @@
   .cell {
     display: grid;
     grid-template-columns: 80px 1fr;
-    border: 1px solid transparent;
-    border-radius: 2px;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md);
     background: var(--surface);
-    margin-bottom: 4px;
+    margin-bottom: 8px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
+  .cell:hover { border-color: var(--border); }
   .cell.focused {
     border-color: var(--accent);
-    box-shadow: inset 4px 0 0 var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-sm);
   }
   .cell.excluded { opacity: 0.55; }
   .cell.excluded .cell-prompt { color: var(--text-dim); }
 
   .cell-prompt {
     grid-row: 1 / span 3;
-    padding: 6px 8px 0 8px;
-    font-family: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
-    font-size: 12px;
+    padding: 10px 10px 0 10px;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+    font-size: 11px;
     color: var(--prompt);
     text-align: right;
     user-select: none;
     line-height: 1.5;
+    background: var(--surface-alt);
+    border-right: 1px solid var(--border-soft);
   }
   .cell.kind-markdown .cell-prompt { color: var(--markdown); }
-  .cell.kind-prompt .cell-prompt { color: #6a1b9a; }
+  .cell.kind-prompt .cell-prompt { color: var(--prompt-cell); }
   .cell-prompt-label { display: block; }
+  .cell-prompt-duration {
+    display: block; margin-top: 2px;
+    font-size: 10px; color: var(--text-muted); font-weight: 500;
+  }
   .cell-prompt-actions {
     margin-top: 4px;
     display: flex; gap: 2px; flex-wrap: wrap; justify-content: flex-end;
@@ -153,66 +210,89 @@
   .cell-body { display: flex; flex-direction: column; min-width: 0; }
 
   .cell-toolbar {
-    display: flex; align-items: center; gap: 6px;
-    padding: 3px 8px; font-size: 11px; color: var(--text-dim);
-    background: var(--surface-alt); border: 1px solid var(--border-soft);
-    border-bottom: none;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; font-size: 11px; color: var(--text-dim);
+    background: var(--surface-alt);
+    border-bottom: 1px solid var(--border-soft);
   }
   .cell-kind-tag {
-    padding: 0 6px; border-radius: 2px; font-weight: 500;
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
-    border: 1px solid currentColor;
+    padding: 2px 8px; border-radius: 999px; font-weight: 600;
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
+    background: currentColor;
   }
-  .cell.kind-python .cell-kind-tag { color: var(--prompt); }
-  .cell.kind-markdown .cell-kind-tag { color: var(--markdown); }
-  .cell.kind-prompt .cell-kind-tag { color: #6a1b9a; }
+  .cell-kind-tag { position: relative; color: var(--prompt); }
+  .cell-kind-tag::before {
+    content: attr(data-label); position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+  }
+  /* Simpler approach: use bg + light text. */
+  .cell-kind-tag { background: transparent; color: var(--prompt); border: 1px solid currentColor; }
+  .cell-kind-tag::before { display: none; }
+  .cell.kind-python .cell-kind-tag { color: var(--prompt); background: var(--accent-soft); border-color: transparent; }
+  .cell.kind-markdown .cell-kind-tag { color: var(--markdown); background: var(--surface); border-color: var(--border); }
+  .cell.kind-prompt .cell-kind-tag { color: var(--prompt-cell); background: #f5f3ff; border-color: transparent; }
   .cell-toolbar .spacer { flex: 1; }
   .icon-btn {
     background: none; border: none; color: var(--text-dim); cursor: pointer;
-    font-size: 12px; padding: 1px 6px; border-radius: 2px;
+    font-size: 11px; padding: 3px 8px; border-radius: 4px;
+    transition: all 0.12s ease;
   }
-  .icon-btn:hover { background: #e0e0e0; color: var(--text); }
-  .icon-btn.active { color: var(--accent-edit); }
+  .icon-btn:hover { background: var(--surface); color: var(--text); }
+  .icon-btn.active { color: var(--accent-edit); background: var(--accent-soft); }
   .run-btn-cell {
-    background: var(--surface); color: var(--accent-edit);
+    background: var(--accent-edit); color: #fff;
     border: 1px solid var(--accent-edit);
-    padding: 1px 8px; border-radius: 2px;
-    font-size: 11px; font-weight: 500; cursor: pointer; font-family: inherit;
+    padding: 4px 12px; border-radius: var(--radius-sm);
+    font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit;
+    transition: all 0.12s ease;
+    box-shadow: 0 1px 2px rgba(79, 70, 229, 0.2);
   }
-  .run-btn-cell:hover { background: #e3f2fd; }
-  .run-btn-cell.cancel { color: var(--red); border-color: var(--red); }
-  .run-btn-cell.cancel:hover { background: #fdecea; }
+  .run-btn-cell:hover { background: #4338ca; border-color: #4338ca; box-shadow: 0 2px 6px rgba(79, 70, 229, 0.3); }
+  .run-btn-cell.cancel { color: #fff; background: var(--red); border-color: var(--red); box-shadow: 0 1px 2px rgba(220, 38, 38, 0.2); }
+  .run-btn-cell.cancel:hover { background: #b91c1c; border-color: #b91c1c; }
   .model-select {
-    font-family: inherit; font-size: 11px; padding: 1px 4px;
-    border: 1px solid var(--border); border-radius: 2px; background: var(--surface);
-    color: var(--text);
+    font-family: inherit; font-size: 11px; padding: 3px 8px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text); cursor: pointer;
+    transition: border-color 0.12s ease;
+  }
+  .model-select:hover { border-color: var(--text-muted); }
+  .model-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .model-tag {
+    font-family: inherit; font-size: 11px; padding: 3px 8px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--text-muted);
   }
 
   /* Cell input area (the "In[]" box) */
   .cell-source {
-    border: 1px solid var(--border-soft);
     background: var(--code-bg);
+    border-bottom: 1px solid var(--border-soft);
   }
+  .cell-source:last-child { border-bottom: none; }
   .cell-source textarea {
-    width: 100%; min-height: 32px; padding: 6px 10px;
+    width: 100%; min-height: 36px; padding: 10px 14px;
     background: transparent; border: none; color: var(--text);
-    font-family: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
-    font-size: 13px; line-height: 1.5;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+    font-size: 13px; line-height: 1.6;
     resize: vertical; outline: none; display: block;
+    tab-size: 4;
   }
-  .cell-source.markdown { background: #fafafa; }
+  .cell-source textarea::placeholder { color: var(--text-muted); }
+  .cell-source.markdown { background: var(--code-bg); }
   .cell-source.markdown textarea { font-family: inherit; }
-  .cell-source.prompt { background: #f5f0fa; border-left: 3px solid #ce93d8; }
+  .cell-source.prompt { background: var(--code-bg); }
   .cell-source.prompt textarea { font-family: inherit; }
 
   /* Output area (the "Out[]" box) */
   .cell-output {
     background: var(--output-bg);
-    border: 1px solid var(--border-soft);
-    border-top: none;
-    padding: 6px 10px; font-size: 12px;
+    border-top: 1px solid var(--border-soft);
+    padding: 10px 14px; font-size: 12px;
     max-height: 600px; overflow-y: auto;
-    font-family: 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
   }
   .cell-output pre {
     background: transparent; border: none; padding: 0;
@@ -222,7 +302,7 @@
     font-family: inherit;
   }
   .stdout { color: var(--text); }
-  .stderr { color: var(--red); background: #fdecea; padding: 4px 6px; border-radius: 2px; }
+  .stderr { color: var(--red); background: var(--red-soft); padding: 4px 6px; border-radius: 2px; }
 
   /* Markdown rendered output (matches Jupyter's normal text) */
   .md-render {
@@ -234,9 +314,9 @@
   .md-render h2 { font-size: 18px; font-weight: 600; margin: 12px 0 6px; color: var(--text); }
   .md-render h3 { font-size: 15px; font-weight: 600; margin: 10px 0 4px; color: var(--text); }
   .md-render code {
-    background: #f4f4f4; padding: 1px 4px; border-radius: 2px;
+    background: var(--surface-alt); padding: 1px 4px; border-radius: 2px;
     font-family: 'Menlo', 'Consolas', monospace; font-size: 90%;
-    color: #c7254e;
+    color: #be185d;
   }
   .md-render pre {
     background: var(--code-bg); border: 1px solid var(--border-soft);
@@ -250,7 +330,7 @@
   .md-render th, .md-render td { border: 1px solid var(--border); padding: 4px 10px; }
   .md-render th { background: var(--surface-alt); font-weight: 600; }
   .md-render blockquote {
-    border-left: 4px solid #ddd; padding-left: 10px;
+    border-left: 4px solid var(--border-soft); padding-left: 10px;
     color: var(--text-dim); margin: 8px 0;
   }
 
@@ -260,17 +340,17 @@
     max-height: 600px; overflow-y: auto;
   }
   .assistant-block {
-    margin: 4px 0; padding: 6px 10px;
-    background: #f3f8fe;
-    border-left: 3px solid var(--accent);
-    border-radius: 0 2px 2px 0;
-    font-size: 13px; line-height: 1.55;
+    margin: 6px 8px; padding: 10px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px; line-height: 1.6;
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   .assistant-block p { margin: 4px 0; }
-  .assistant-block code { background: #e8eef5; padding: 1px 4px; border-radius: 2px; font-family: 'Menlo', monospace; font-size: 12px; color: #c7254e; }
-  .assistant-block pre { background: var(--code-bg); border: 1px solid var(--border-soft); padding: 6px 8px; border-radius: 2px; margin: 4px 0; font-size: 12px; overflow-x: auto; font-family: 'Menlo', monospace; }
+  .assistant-block code { background: var(--surface-alt); padding: 1px 5px; border-radius: 3px; font-family: 'Menlo', monospace; font-size: 12px; color: #be185d; }
+  .assistant-block pre { background: var(--code-bg); border: 1px solid var(--border-soft); padding: 8px 10px; border-radius: 4px; margin: 6px 0; font-size: 12px; overflow-x: auto; font-family: 'Menlo', monospace; }
   .tool-block {
     margin: 6px 0 6px 8px; padding-left: 10px;
     border-left: 3px solid var(--tool-python);
@@ -297,7 +377,7 @@
   }
   .tool-result {
     margin: 2px 0 8px 24px; padding-left: 8px;
-    border-left: 2px dashed #bbb;
+    border-left: 2px dashed var(--border);
     font-size: 12px;
   }
   .tool-result-tag { color: var(--text-dim); margin-bottom: 3px; font-size: 11px; font-family: 'Menlo', monospace; }
@@ -308,38 +388,49 @@
     border: 1px solid var(--border-soft);
   }
 
-  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-dim); }
-  .empty-state h2 { color: var(--text); margin-bottom: 8px; font-size: 17px; font-weight: 500; }
-  .empty-state p { margin-bottom: 14px; font-size: 13px; }
+  .empty-state { text-align: center; padding: 80px 20px; color: var(--text-dim); }
+  .empty-state h2 { color: var(--text); margin-bottom: 10px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .empty-state p { margin-bottom: 16px; font-size: 13px; }
 
   .add-cell-bar {
     display: flex; gap: 6px; justify-content: center;
-    padding: 4px; margin: 2px 0;
+    padding: 6px; margin: 2px 0;
+    opacity: 0.4; transition: opacity 0.15s ease;
   }
-  .add-cell-bar .btn { font-size: 11px; padding: 2px 8px; }
+  .add-cell-bar:hover { opacity: 1; }
+  .add-cell-bar .btn { font-size: 11px; padding: 4px 10px; border-radius: var(--radius-sm); }
 
   /* Floating session widget (top-right) */
   .session-widget {
-    position: fixed; top: 16px; right: 16px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-    padding: 10px 12px; min-width: 200px; z-index: 50;
-    font-family: 'Menlo', 'Consolas', monospace; font-size: 11px;
-    color: var(--text);
+    position: fixed; top: 20px; right: 20px;
+    background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+    padding: 14px 16px; min-width: 220px; z-index: 50;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 11px; color: var(--text);
+    backdrop-filter: blur(8px);
   }
   .session-widget .row {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; margin-bottom: 6px;
+    gap: 12px; margin-bottom: 10px;
   }
   .session-widget .row:last-child { margin-bottom: 0; }
-  .session-widget .label { color: var(--text-dim); }
-  .session-widget .val { color: var(--text); font-weight: 500; }
+  .session-widget .label {
+    color: var(--text-muted); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .session-widget .val {
+    color: var(--text); font-weight: 600;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+    font-size: 11px;
+  }
   .session-widget .ctx-bar {
-    height: 4px; background: var(--surface-alt); border-radius: 2px;
-    overflow: hidden; margin-top: 2px;
+    height: 5px; background: var(--surface-alt); border-radius: 999px;
+    overflow: hidden; margin-top: 4px;
   }
   .session-widget .ctx-bar-fill {
-    height: 100%; background: var(--accent-edit);
+    height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-edit));
+    border-radius: 999px;
     transition: width 0.3s ease;
   }
   .session-widget .ctx-bar-fill.warn { background: var(--yellow); }
@@ -352,26 +443,35 @@
   .session-widget .cost { color: var(--green); }
 
   /* Modals */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 18px; max-width: 600px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
-  .modal h3 { margin-bottom: 10px; font-size: 15px; font-weight: 500; }
-  .modal p { color: var(--text-dim); margin-bottom: 12px; font-size: 13px; }
-  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); padding: 22px; max-width: 600px; width: 90%; box-shadow: var(--shadow-lg); }
+  .modal h3 { margin-bottom: 10px; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .modal p { color: var(--text-dim); margin-bottom: 14px; font-size: 13px; line-height: 1.5; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
-  .session-list { display: flex; flex-direction: column; gap: 2px; max-height: 400px; overflow-y: auto; }
+  .session-list { display: flex; flex-direction: column; gap: 4px; max-height: 400px; overflow-y: auto; }
   .session-item {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 8px 12px; background: var(--surface);
-    border: 1px solid var(--border-soft); border-radius: 2px; cursor: pointer;
+    padding: 10px 14px; background: var(--surface);
+    border: 1px solid var(--border-soft); border-radius: var(--radius-sm); cursor: pointer;
+    transition: all 0.12s ease;
   }
-  .session-item:hover { border-color: var(--accent); background: #f3f8fe; }
+  .session-item:hover { border-color: var(--accent); background: var(--accent-soft); }
 
   .error-bar {
-    padding: 8px 14px; background: #fdecea;
-    border: 1px solid var(--red); border-radius: 2px; margin-bottom: 10px;
+    padding: 10px 16px; background: var(--red-soft);
+    border: 1px solid #fecaca; border-radius: var(--radius-sm); margin-bottom: 12px;
     font-size: 12px; color: var(--red); display: flex; align-items: center; justify-content: space-between;
+    box-shadow: var(--shadow-sm);
   }
-  .error-bar button { background: none; border: none; color: var(--red); cursor: pointer; font-size: 14px; padding: 0 4px; }
+  .error-bar button { background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1; }
+  .error-bar button:hover { opacity: 0.7; }
+
+  /* Custom scrollbars (subtle, modern) */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
   /* Spinner */
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -383,7 +483,11 @@
 <script type="text/babel">
 const { useState, useCallback, useMemo, useRef, useEffect } = React;
 
-const API = 'http://localhost:8787';
+// Same-origin: when served from the container, the page is loaded over
+// HTTPS with Basic auth and the browser will replay credentials on every
+// fetch automatically. Localhost dev still works because server.py serves
+// notebook.html itself on :8787.
+const API = '';
 
 // -------------------------- helpers --------------------------
 
@@ -398,6 +502,25 @@ function uuid4() {
 async function api(path, opts = {}) {
   const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   return res.json();
+}
+
+// USD per token. Cached input is the OpenAI "cached_input" rate (~10% of
+// regular input for gpt-5 family). Update when prices change.
+const MODEL_PRICING = {
+  'gpt-5.5':       { input: 5.00 / 1e6, cachedInput: 0.500 / 1e6, output: 30.00 / 1e6 },
+  'gpt-5':         { input: 1.25 / 1e6, cachedInput: 0.125 / 1e6, output: 10.00 / 1e6 },
+  'gpt-5-mini':    { input: 0.25 / 1e6, cachedInput: 0.025 / 1e6, output:  2.00 / 1e6 },
+  'gpt-5-nano':    { input: 0.05 / 1e6, cachedInput: 0.005 / 1e6, output:  0.40 / 1e6 },
+};
+const DEFAULT_PRICING = MODEL_PRICING['gpt-5.5'];
+
+function computeCost(model, usage) {
+  if (!usage) return 0;
+  const p = MODEL_PRICING[model] || DEFAULT_PRICING;
+  const cached = usage.cache_read_input_tokens || 0;
+  const freshInput = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+  const output = usage.output_tokens || 0;
+  return freshInput * p.input + cached * p.cachedInput + output * p.output;
 }
 
 function parseSessionJSONL(text) {
@@ -493,50 +616,30 @@ async function streamRun(body, onEvent, onEnd, onError, aborter) {
 // -------------------------- transcript building --------------------------
 
 const HIDDEN_TOOLS = new Set(['ToolSearch']);
-const KERNEL_TOOL = 'mcp__kernel__python_run';
+const KERNEL_TOOL = 'python_run';
 const CODE_TOOLS = new Set(['Bash', 'Edit', 'Write']);
 
-// Reduce stream-json events into ordered transcript blocks.
+// Reduce sidecar events into ordered transcript blocks.
+// The sidecar already shapes events into {kind: assistant_text|tool_use|tool_result}.
 function reduceTranscript(blocks, event, data, toolNameById) {
   if (event !== 'event') return blocks;
-  const t = data.type;
-  if (t === 'assistant') {
-    const message = data.message || {};
-    const content = Array.isArray(message.content) ? message.content
-                  : (typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : []);
-    for (const block of content) {
-      if (block.type === 'text' && typeof block.text === 'string') {
-        // Coalesce consecutive text blocks
-        const last = blocks[blocks.length - 1];
-        if (last && last.kind === 'text') last.text += block.text;
-        else blocks.push({ kind: 'text', text: block.text });
-      } else if (block.type === 'tool_use') {
-        const name = block.name || 'unknown';
-        const id = block.id || '';
-        if (id) toolNameById.set(id, name);
-        if (HIDDEN_TOOLS.has(name)) continue;
-        blocks.push({ kind: 'tool_use', id, name, input: block.input });
-      }
-    }
-    if (message.usage) blocks.usage = message.usage;
-  } else if (t === 'user') {
-    const message = data.message || {};
-    const content = Array.isArray(message.content) ? message.content : [];
-    for (const block of content) {
-      if (block.type === 'tool_result') {
-        const id = block.tool_use_id || '';
-        const calledName = id ? (toolNameById.get(id) || '') : '';
-        if (HIDDEN_TOOLS.has(calledName)) continue;
-        const text = calledName === KERNEL_TOOL
-          ? extractTextContent(block.content)
-          : stringifyContent(block.content);
-        blocks.push({ kind: 'tool_result', id, name: calledName, text });
-      }
-    }
-  } else if (t === 'result') {
-    blocks.result = data;
-  } else if (t === 'system') {
-    blocks.system = data;
+  const ev = data.event || data;  // tolerate either wrapper
+  const k = ev.kind;
+  if (k === 'assistant_text' && typeof ev.text === 'string') {
+    const last = blocks[blocks.length - 1];
+    if (last && last.kind === 'text') last.text += ev.text;
+    else blocks.push({ kind: 'text', text: ev.text });
+  } else if (k === 'tool_use') {
+    const name = ev.name || 'unknown';
+    const id = ev.id || '';
+    if (id) toolNameById.set(id, name);
+    if (HIDDEN_TOOLS.has(name)) return blocks;
+    blocks.push({ kind: 'tool_use', id, name, input: ev.input });
+  } else if (k === 'tool_result') {
+    const id = ev.id || '';
+    const calledName = ev.name || (id ? (toolNameById.get(id) || '') : '');
+    if (HIDDEN_TOOLS.has(calledName)) return blocks;
+    blocks.push({ kind: 'tool_result', id, name: calledName, text: ev.text || '' });
   }
   return blocks;
 }
@@ -603,12 +706,7 @@ function CellToolbar({ cell, running, onRun, onCancel, onToggleInclude, onChange
   return (
     <div className="cell-toolbar">
       <span className="cell-kind-tag">{cell.kind}</span>
-      {cell.kind === 'prompt' && (
-        <select className="model-select" value={cell.model || 'sonnet'} onChange={(e) => onChangeModel(e.target.value)} title="Model">
-          <option value="sonnet">sonnet</option>
-          <option value="opus">opus</option>
-        </select>
-      )}
+      {cell.kind === 'prompt' && <span className="model-tag">gpt-5.5</span>}
       {(cell.kind === 'python' || cell.kind === 'prompt') && (
         <button className={`icon-btn ${cell.included !== false ? 'active' : ''}`} title="Include in next prompt's context"
                 onClick={onToggleInclude}>{cell.included !== false ? '◉ included' : '○ excluded'}</button>
@@ -623,7 +721,7 @@ function CellToolbar({ cell, running, onRun, onCancel, onToggleInclude, onChange
   );
 }
 
-function PromptGutter({ kind, runNumber, running, onMoveUp, onMoveDown, onDelete }) {
+function PromptGutter({ kind, runNumber, running, duration, onMoveUp, onMoveDown, onDelete }) {
   let label;
   if (kind === 'python') label = `In [${runNumber || ' '}]:`;
   else if (kind === 'prompt') label = running ? 'In [*]:' : `In [${runNumber || ' '}]:`;
@@ -631,6 +729,11 @@ function PromptGutter({ kind, runNumber, running, onMoveUp, onMoveDown, onDelete
   return (
     <div className="cell-prompt">
       <span className="cell-prompt-label">{label}</span>
+      {duration ? (
+        <span className="cell-prompt-duration" title="Run duration">
+          {(duration / 1000).toFixed(1)}s
+        </span>
+      ) : null}
       <div className="cell-prompt-actions">
         <button className="icon-btn" title="Move up" onClick={onMoveUp}>↑</button>
         <button className="icon-btn" title="Move down" onClick={onMoveDown}>↓</button>
@@ -706,38 +809,22 @@ function PromptCell({ cell, running, onRun, onCancel, onChange, onMoveUp, onMove
   useEffect(auto, [cell.source]);
   return (
     <div className={`cell kind-prompt ${cell.included === false ? 'excluded' : ''}`}>
-      <PromptGutter kind="prompt" runNumber={cell.runNumber} running={running} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onDelete={onDelete} />
+      <PromptGutter kind="prompt" runNumber={cell.runNumber} running={running} duration={cell.duration} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onDelete={onDelete} />
       <div className="cell-body">
         <CellToolbar cell={cell} running={running} onRun={onRun} onCancel={onCancel} {...rest} />
         <div className="cell-source prompt">
           <textarea ref={taRef} value={cell.source}
                     onChange={(e) => { onChange({ source: e.target.value }); auto(); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onRun(); } }}
-                    placeholder="Ask Claude... (Cmd+Enter)" spellCheck={false} />
+                    placeholder="Ask Copilot... (Cmd+Enter)" spellCheck={false} />
         </div>
         {(cell.transcript && cell.transcript.length > 0) && (
           <div className="cell-output">
             <TranscriptView blocks={cell.transcript} />
-            {(cell.usage || cell.duration) && (
-              <div style={{ marginTop: 6, padding: '6px 10px', background: '#f1f5f9', borderRadius: 4, fontSize: 11, color: 'var(--text-dim)', fontFamily: "'Menlo', monospace" }}>
-                {cell.usage && (() => {
-                  const u = cell.usage;
-                  const parts = [
-                    `in: ${formatTokens(u.input_tokens || 0)}`,
-                    u.cache_read_input_tokens ? `cached: ${formatTokens(u.cache_read_input_tokens)}` : '',
-                    u.cache_creation_input_tokens ? `new_cache: ${formatTokens(u.cache_creation_input_tokens)}` : '',
-                    `out: ${formatTokens(u.output_tokens || 0)}`,
-                  ].filter(Boolean);
-                  return <span>{parts.join(' | ')}</span>;
-                })()}
-                {cell.duration ? <span style={{ marginLeft: 12 }}>{(cell.duration / 1000).toFixed(1)}s</span> : null}
-                {cell.cost ? <span style={{ marginLeft: 12, color: 'var(--green)' }}>${cell.cost.toFixed(4)}</span> : null}
-              </div>
-            )}
           </div>
         )}
         {running && (!cell.transcript || cell.transcript.length === 0) && (
-          <div className="cell-output"><span className="pulse">claude is thinking…</span></div>
+          <div className="cell-output"><span className="pulse">copilot is thinking…</span></div>
         )}
       </div>
     </div>
@@ -760,37 +847,8 @@ function newCell(kind) {
   const base = { id: uuid4(), kind, source: '', included: true };
   if (kind === 'python') return { ...base, output: '', outputErr: '' };
   if (kind === 'markdown') return { ...base };
-  // `historyMessages` carries the raw stream-json slice for this turn so a
-  // future run can replay it as a synthetic prior — same shape vscode's
-  // ClaudeHistory.messages stores. Cleared at the start of each run.
-  if (kind === 'prompt') return { ...base, model: 'sonnet', transcript: [], usage: null, duration: 0, cost: 0, historyMessages: null };
+  if (kind === 'prompt') return { ...base, model: 'gpt-5.5', transcript: [], usage: null, duration: 0, cost: 0 };
   return base;
-}
-
-/** Slice the final session JSONL into "this turn's messages": from the
- * last non-meta `user` whose content ends with `prompt`, through the end
- * (excluding `last-prompt` and `attachment` lines that the CLI re-emits).
- * Mirrors vscode/src/services/backends/claude.ts extractLastTurnMessages. */
-function extractLastTurnMessages(sessionContent, prompt) {
-  if (!sessionContent) return [];
-  const all = parseSessionJSONL(sessionContent);
-  if (!all.length) return [];
-  let turnStart = -1;
-  for (let i = all.length - 1; i >= 0; i--) {
-    const m = all[i];
-    if (m.type !== 'user' || m.isMeta) continue;
-    const content = m.message?.content;
-    if (typeof content === 'string' && content.endsWith(prompt)) { turnStart = i; break; }
-    if (turnStart === -1) turnStart = i;
-  }
-  if (turnStart === -1) return [];
-  const out = [];
-  for (const m of all.slice(turnStart)) {
-    if (m.type === 'last-prompt') continue;
-    if (m.type === 'attachment') continue;
-    out.push(m);
-  }
-  return out;
 }
 
 function App() {
@@ -876,85 +934,62 @@ function App() {
     if (!cell.source.trim()) return;
     if (running[cell.id]) return;
 
-    // Always rebuild priors from the live notebook (mirrors vscode). Re-running
-    // any cell synthesizes a fresh session from its currently-included priors,
-    // so edits to earlier cells take effect immediately. Prompt cells with a
-    // captured `historyMessages` blob splice their real stream-json messages
-    // (including tool calls + results); python cells synthesize a user/assistant
-    // pair narrating the code + output.
+    // Build priorRuns from cells above this one, mirroring the vscode
+    // CopilotBackend: each entry carries the source/output (python) or
+    // the captured `history` blob (prompt). The sidecar replays these
+    // into a synthetic session before the new prompt.
     const idx = cells.findIndex((c) => c.id === cell.id);
-    const priorTurns = [];
-    for (const c of cells.slice(0, idx)) {
-      if (c.included === false) continue;
-      if (c.kind === 'python') {
-        if (!c.source.trim()) continue;
-        priorTurns.push({
+    const priorRuns = [];
+    for (let i = 0; i < idx; i++) {
+      const c = cells[i];
+      if (c.kind === 'python' && c.source) {
+        priorRuns.push({
           kind: 'python',
+          included: c.included !== false,
           source: c.source,
           output: c.output || c.outputErr || '',
         });
-      } else if (c.kind === 'markdown') {
-        if (!c.source.trim()) continue;
-        priorTurns.push({ kind: 'markdown', source: c.source });
-      } else if (c.kind === 'prompt') {
-        if (!c.historyMessages || !c.historyMessages.length) continue;
-        priorTurns.push({ kind: 'prompt', messages: c.historyMessages });
+      } else if (c.kind === 'prompt' && c.history) {
+        priorRuns.push({
+          kind: 'prompt',
+          included: c.included !== false,
+          history: c.history,
+        });
       }
     }
 
-    // Reset cell state — clear prior history so a re-run replaces it cleanly.
     runCounterRef.current += 1;
-    updateCell(cell.id, { transcript: [], usage: null, duration: 0, cost: 0, runNumber: runCounterRef.current, historyMessages: null });
+    updateCell(cell.id, { transcript: [], usage: null, duration: 0, cost: 0, runNumber: runCounterRef.current });
 
     const blocks = [];
     const toolNameById = new Map();
-    // Mirrors vscode: excluded prompt cells run standalone (no priors), so
-    // their wire numbers and cost should not affect global session totals.
     const isExcluded = cell.included === false;
 
     const onEvent = (eventName, data) => {
       reduceTranscript(blocks, eventName, data, toolNameById);
-      // Live-update the gauge from streamed assistant usage so the bar
-      // moves while the turn is in progress. Skip for excluded runs.
-      if (!isExcluded && data.type === 'assistant' && data.message?.usage) {
-        const usage = data.message.usage;
-        const totalContext =
-          (usage.input_tokens || 0)
-          + (usage.cache_creation_input_tokens || 0)
-          + (usage.cache_read_input_tokens || 0)
-          + (usage.output_tokens || 0);
-        if (totalContext) setLastInputTokens(totalContext);
-      }
       updateCell(cell.id, { transcript: [...blocks] });
     };
 
     const onEnd = (data) => {
-      const r = blocks.result || {};
-      const usage = r.usage;
-      // Final gauge value from the result event — most authoritative.
-      // Includes input + cache_read + cache_creation + output, the full
-      // footprint of the latest non-excluded turn.
-      if (!isExcluded && usage) {
-        const totalContext =
-          (usage.input_tokens || 0)
-          + (usage.cache_creation_input_tokens || 0)
-          + (usage.cache_read_input_tokens || 0)
-          + (usage.output_tokens || 0);
-        if (totalContext) setLastInputTokens(totalContext);
-      }
-      const turnCost = Number(r.total_cost_usd || 0);
-      // Excluded runs don't accumulate cost into the session total either.
+      const r = (data && data.result) || {};
+      const usage = r.usage || {};
+      const totalContext =
+        (usage.input_tokens || 0)
+        + (usage.cache_creation_input_tokens || 0)
+        + (usage.cache_read_input_tokens || 0)
+        + (usage.output_tokens || 0);
+      if (!isExcluded && totalContext) setLastInputTokens(totalContext);
+      // BYOK SDK reports cost: 0 — compute it client-side from the usage
+      // counters and the model's published per-token pricing.
+      const sdkCost = Number(r.cost || 0);
+      const turnCost = sdkCost > 0 ? sdkCost : computeCost(cell.model, usage);
       if (turnCost && !isExcluded) setTotalCost((p) => p + turnCost);
-      // Capture this turn's stream-json slice for replay on the next run.
-      // Mirrors vscode's ClaudeHistory.messages — these messages (with
-      // parentUuid relinked) become a synthetic prior in future sessions.
-      const historyMessages = extractLastTurnMessages(data.sessionContent || '', cell.source);
       updateCell(cell.id, {
         transcript: [...blocks],
         usage: r.usage || null,
         duration: r.duration_ms || 0,
         cost: turnCost,
-        historyMessages,
+        history: r.history || null,
       });
       setRunning((p) => { const n = { ...p }; delete n[cell.id]; return n; });
     };
@@ -967,8 +1002,11 @@ function App() {
     const aborter = new AbortController();
     setRunning((p) => ({ ...p, [cell.id]: aborter }));
     await streamRun({
-      priorTurns, prompt: cell.source,
-      kernelId: kernelIdRef.current, model: cell.model || 'sonnet',
+      prompt: cell.source,
+      kernelId: kernelIdRef.current,
+      model: 'gpt-5.5',
+      isExcluded,
+      priorRuns,
     }, onEvent, onEnd, onError, aborter);
   }, [cells, running, updateCell]);
 
@@ -985,7 +1023,9 @@ function App() {
       <FileSidebar kernelId={kernelIdRef.current} running={running} />
       <div className="app">
       <div className="header">
-        <h1><span>Claude</span> Notebook</h1>
+        <span className="brand">SADataCopilot</span>
+        <span className="divider"></span>
+        <span className="tagline">Agentic Notebook for Data Analysis</span>
       </div>
 
       {error && (

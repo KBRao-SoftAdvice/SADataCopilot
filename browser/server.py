@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-Backend for Claude Notebook (browser).
+Backend for SADataCopilot Notebook (browser).
 
 Bridges the browser to:
 - a Python kernel (subprocess REPL, one per session)
-- `claude -p` with stream-json output and an MCP `python_run` tool that
-  forwards back into the same kernel via a localhost HTTP bridge.
+- a long-lived Node sidecar that drives @github/copilot-sdk against an
+  OpenAI-compatible endpoint. The sidecar reaches back into the user's
+  kernel via a localhost HTTP bridge for the python_run tool.
 
 Endpoints:
   GET  /api/health
   GET  /api/files?kernelId=...       list files in the session workspace
   POST /api/python/exec              { kernelId, code } -> { ok, output }
-  POST /api/run                      stream-json SSE: prompt + claude -p
+  POST /api/run                      SSE stream of agent events
   POST /api/keepalive                { kernelId } -> { alive }
-  POST /api/kernel-bridge/run        (called by MCP child only) bearer-token
+  POST /api/kernel-bridge/run        (called by sidecar) bearer-token
 """
 
 import http.server
@@ -296,6 +297,118 @@ def bridge_unregister(token):
 
 
 # ---------------------------------------------------------------------------
+# Sidecar manager (one long-lived Node process per server)
+# ---------------------------------------------------------------------------
+#
+# Protocol on the sidecar's stdio: one JSON object per line in each direction.
+# Request:  {"requestId", "prompt", "model", "kernelId"}
+# Response: stream of {"requestId", "type": "event"|"end"|"error", ...}
+#
+# A single shared bridge token is registered with the sidecar at spawn time so
+# the python_run tool can call back without per-request token plumbing.
+
+SIDECAR_PATH = os.path.join(HERE, "sidecar.mjs")
+NODE_BIN = os.environ.get("NODE_BIN", "node")
+
+_SIDECAR_PROC = None
+_SIDECAR_BRIDGE_TOKEN = None
+_SIDECAR_LOCK = threading.Lock()
+# requestId -> queue.Queue of dict events from the sidecar.
+_SIDECAR_INBOX = {}
+_SIDECAR_INBOX_LOCK = threading.Lock()
+
+
+def _sidecar_route_kernel_for_token(token):
+    """The sidecar uses a single shared bridge token (set at spawn) but each
+    request specifies its own kernelId in the python_run tool args, which the
+    sidecar relays through. Look up the token's "default" kernel — actually
+    unused now since the sidecar passes kernelId in the bridge POST body."""
+    return None
+
+
+def _sidecar_start():
+    global _SIDECAR_PROC, _SIDECAR_BRIDGE_TOKEN
+    if _SIDECAR_PROC and _SIDECAR_PROC.poll() is None:
+        return
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise RuntimeError("OPENAI_API_KEY must be set")
+
+    # Shared token used by the sidecar's python_run tool to authenticate to
+    # /api/kernel-bridge/run. Register with kernel_id="" — the bridge handler
+    # will look at the request body's kernelId instead.
+    _SIDECAR_BRIDGE_TOKEN = secrets.token_hex(24)
+    with BRIDGE_LOCK:
+        BRIDGE_REGISTRATIONS[_SIDECAR_BRIDGE_TOKEN] = "*"  # wildcard: trust body's kernelId
+
+    env = dict(os.environ)
+    env["OPENAI_API_KEY"] = openai_key
+    env["KERNEL_BRIDGE_URL"] = "http://127.0.0.1:" + str(PORT) + "/api/kernel-bridge/run"
+    env["KERNEL_BRIDGE_TOKEN"] = _SIDECAR_BRIDGE_TOKEN
+
+    sys.stdout.write("[sidecar] spawning {} {}\n".format(NODE_BIN, SIDECAR_PATH))
+    sys.stdout.flush()
+    _SIDECAR_PROC = subprocess.Popen(
+        [NODE_BIN, SIDECAR_PATH],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=HERE,
+        env=env,
+        bufsize=1,
+    )
+
+    def _read_stdout():
+        for line in _SIDECAR_PROC.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except Exception:
+                sys.stdout.write("[sidecar] non-json stdout: {}\n".format(line[:200]))
+                sys.stdout.flush()
+                continue
+            req_id = msg.get("requestId")
+            if not req_id:
+                continue
+            with _SIDECAR_INBOX_LOCK:
+                q = _SIDECAR_INBOX.get(req_id)
+            if q is not None:
+                q.put(msg)
+
+    def _read_stderr():
+        for line in _SIDECAR_PROC.stderr:
+            sys.stdout.write("[sidecar:err] " + line)
+            sys.stdout.flush()
+
+    threading.Thread(target=_read_stdout, daemon=True).start()
+    threading.Thread(target=_read_stderr, daemon=True).start()
+
+
+def _sidecar_send(payload):
+    with _SIDECAR_LOCK:
+        if not _SIDECAR_PROC or _SIDECAR_PROC.poll() is not None:
+            _sidecar_start()
+        _SIDECAR_PROC.stdin.write(json.dumps(payload) + "\n")
+        _SIDECAR_PROC.stdin.flush()
+
+
+def _sidecar_register_request(req_id):
+    import queue as _queue
+    q = _queue.Queue()
+    with _SIDECAR_INBOX_LOCK:
+        _SIDECAR_INBOX[req_id] = q
+    return q
+
+
+def _sidecar_unregister_request(req_id):
+    with _SIDECAR_INBOX_LOCK:
+        _SIDECAR_INBOX.pop(req_id, None)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -305,8 +418,11 @@ def is_valid_uuid(s):
 
 def get_project_dir(cwd):
     """Map a working directory to its `~/.claude/projects/<safe-cwd>/` slot.
-    Claude's session store keys directories by replacing slashes with dashes."""
-    safe_cwd = cwd.replace("/", "-")
+    Claude's session store slugifies the cwd by replacing every `/` AND every
+    `.` with `-` (so `/foo/.workspaces/x` becomes `-foo--workspaces-x`).
+    Replacing only `/` puts our seeded JSONL in a sibling directory and
+    `--resume` then errors with "No conversation found with session ID"."""
+    safe_cwd = cwd.replace("/", "-").replace(".", "-")
     d = os.path.join(PROJECTS_DIR, safe_cwd)
     os.makedirs(d, exist_ok=True)
     return d
@@ -460,7 +576,7 @@ class NotebookHandler(http.server.SimpleHTTPRequestHandler):
         per-origin until the tab/window is closed."""
         self.send_response(401)
         self._cors()
-        self.send_header("WWW-Authenticate", 'Basic realm="Claude Notebook"')
+        self.send_header("WWW-Authenticate", 'Basic realm="SADataCopilot"')
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
         self.wfile.write(b"Authentication required")
@@ -495,7 +611,7 @@ class NotebookHandler(http.server.SimpleHTTPRequestHandler):
             return
         if path == "/api/run":
             # streamed; do not pre-read body via _read_body chunked
-            self._run_claude_stream()
+            self._run_sidecar_stream()
             return
         body = self._read_body()
         if path == "/api/python/exec":
@@ -589,29 +705,54 @@ class NotebookHandler(http.server.SimpleHTTPRequestHandler):
     def _kernel_bridge_run(self, body):
         auth = self.headers.get("Authorization", "")
         token = auth[7:] if auth.startswith("Bearer ") else ""
-        kernel_id = bridge_lookup(token)
-        if not kernel_id:
+        registered = bridge_lookup(token)
+        if not registered:
+            sys.stdout.write("[bridge] UNAUTHORIZED token_prefix={!r}\n".format(token[:8]))
+            sys.stdout.flush()
             self._json_response({"error": "unauthorized"}, 401)
+            return
+        # Wildcard registration ("*") = sidecar token; body must specify kernelId.
+        # Per-kernel registration = legacy single-kernel binding.
+        kernel_id = body.get("kernelId", "") if registered == "*" else registered
+        if not kernel_id:
+            self._json_response({"error": "kernelId required"}, 400)
             return
         code = body.get("code", "")
         if not isinstance(code, str):
             self._json_response({"error": "code must be a string"}, 400)
             return
+        sys.stdout.write("[bridge] kernel={} run({} chars)\n".format(kernel_id, len(code)))
+        sys.stdout.flush()
         try:
             kernel = get_kernel(kernel_id)
             result = kernel.run(code)
+            sys.stdout.write("[bridge] kernel={} done ok={}\n".format(
+                kernel_id, result.get("ok") if isinstance(result, dict) else "?"))
+            sys.stdout.flush()
             self._json_response(result)
         except Exception as e:
+            sys.stdout.write("[bridge] kernel={} EXCEPTION {}: {}\n".format(
+                kernel_id, type(e).__name__, e))
+            sys.stdout.flush()
             self._json_response({"error": str(e)}, 500)
 
-    # -- claude run (streaming) ---------------------------------------------
+    # -- agent run (streaming via sidecar) ----------------------------------
 
-    def _run_claude_stream(self):
+    def _run_sidecar_stream(self):
         body = self._read_body()
-        prior_turns = body.get("priorTurns", []) or []
         prompt = body.get("prompt", "")
         kernel_id = body.get("kernelId", "")
-        model = body.get("model", "")  # 'sonnet' | 'opus' | ''
+        model = body.get("model", "") or "gpt-5-mini"
+        is_excluded = bool(body.get("isExcluded", False))
+        prior_runs = body.get("priorRuns", []) or []
+
+        run_id = uuid.uuid4().hex[:8]
+        def rlog(msg):
+            sys.stdout.write("[run {}] {}\n".format(run_id, msg))
+            sys.stdout.flush()
+
+        rlog("ENTER kernel={} model={!r} prompt={!r}".format(
+            kernel_id, model, prompt[:80]))
 
         if not prompt:
             self._json_response({"error": "prompt is required"}, 400)
@@ -620,97 +761,10 @@ class NotebookHandler(http.server.SimpleHTTPRequestHandler):
             self._json_response({"error": "kernelId is required"}, 400)
             return
 
-        # Per-session sandbox: each kernel gets its own scratch dir, and
-        # claude -p runs with cwd=workspace + --settings sandboxing
-        # restricting all reads/writes to that dir.
-        workspace = get_workspace(kernel_id)
-        project_dir = get_project_dir(workspace)
+        # Ensure workspace exists so the kernel + python_run share state.
+        get_workspace(kernel_id)
 
-        # Always start a fresh session id and seed it from priors. No resume
-        # path — the browser is single-shot per page load and re-runs always
-        # rebuild the synthetic conversation from live cells.
-        session_id = str(uuid.uuid4())
-        resume = False
-        if prior_turns:
-            jsonl = build_session_jsonl(prior_turns, session_id, workspace)
-            fpath = os.path.join(project_dir, session_id + ".jsonl")
-            with open(fpath, "w") as f:
-                f.write(jsonl)
-            resume = True
-
-        # MCP python_run bridge.
-        bridge_token = bridge_register(kernel_id)
-        mcp_config = {
-            "mcpServers": {
-                "kernel": {
-                    "command": PYTHON_BIN,
-                    "args": [MCP_SERVER_PATH],
-                    "env": {
-                        "KERNEL_BRIDGE_URL": "http://127.0.0.1:" + str(PORT),
-                        "KERNEL_BRIDGE_TOKEN": bridge_token,
-                    },
-                }
-            }
-        }
-        # Two-layer sandbox confining claude to the workspace:
-        #
-        # 1) `sandbox.filesystem` — OS-level enforcement. Restricts the Bash
-        #    tool and any subprocess it spawns to read/write only under the
-        #    workspace dir.
-        #
-        # 2) `permissions.allow` + `permissions.deny` — tool-level enforcement
-        #    for Read/Edit/Write (which bypass the OS sandbox since they run
-        #    inside claude's own Node process). The deny pattern uses a single
-        #    leading slash (`/**`) — the gitignore-style "everything" glob
-        #    that loses to a more specific allow on conflict. This gives us
-        #    deny-by-default outside the workspace, allow inside.
-        #
-        # Important: `Read(//**)` (DOUBLE slash) does NOT behave the same —
-        # it shadows the workspace allow and blocks Write/Edit inside too.
-        # `claude -p` also has no built-in default-deny for unmatched paths
-        # (without an explicit deny, Read of /tmp/anything goes through), so
-        # the deny rule is required, not optional.
-        sandbox_settings = {
-            "sandbox": {
-                "enabled": True,
-                "filesystem": {
-                    "allowRead": [workspace],
-                    "allowWrite": [workspace],
-                },
-            },
-            "permissions": {
-                "allow": [
-                    "Read({}/**)".format(workspace),
-                    "Edit({}/**)".format(workspace),
-                    "Write({}/**)".format(workspace),
-                ],
-                "deny": [
-                    "Read(/**)",
-                    "Edit(/**)",
-                    "Write(/**)",
-                ],
-            },
-        }
-        mcp_args = [
-            "--mcp-config", json.dumps(mcp_config),
-            "--strict-mcp-config",
-            "--settings", json.dumps(sandbox_settings),
-            "--allowedTools", "Bash", "Read", "Edit", "Write", "mcp__kernel__python_run",
-        ]
-
-        cmd = ["claude", "-p"]
-        if model in ("sonnet", "opus"):
-            cmd += ["--model", model]
-        cmd += ["--output-format", "stream-json", "--verbose"]
-        cmd += mcp_args
-        if resume:
-            cmd += ["--resume", session_id]
-        else:
-            cmd += ["--session-id", session_id]
-        full_prompt = build_preamble() + "\n\n" + prompt
-        cmd.append(full_prompt)
-
-        # Stream as SSE
+        # SSE stream
         self.send_response(200)
         self._cors()
         self.send_header("Content-Type", "text/event-stream")
@@ -727,67 +781,61 @@ class NotebookHandler(http.server.SimpleHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
-        emit("start", {"sessionId": session_id, "resume": resume})
-
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=workspace,
-            )
-        except FileNotFoundError:
-            emit("error", {"message": "claude CLI not found in PATH"})
-            emit("end", {"sessionId": session_id})
-            if bridge_token:
-                bridge_unregister(bridge_token)
+            _sidecar_start()
+        except Exception as e:
+            rlog("sidecar start failed: {}".format(e))
+            emit("error", {"message": "sidecar unavailable: " + str(e)})
+            emit("end", {})
             return
 
-        result_session_id = session_id
-        # Pipe stdout line-by-line as raw stream-json events
+        request_id = uuid.uuid4().hex
+        inbox = _sidecar_register_request(request_id)
+        emit("start", {"sessionId": request_id})
+        rlog("sending to sidecar requestId={}".format(request_id))
+
         try:
-            for line in proc.stdout:
-                line = line.rstrip("\n")
-                if not line.strip():
-                    continue
-                try:
-                    parsed = json.loads(line)
-                except json.JSONDecodeError:
-                    emit("raw", {"line": line})
-                    continue
-                emit("event", parsed)
-                if parsed.get("type") == "result":
-                    sid = parsed.get("session_id")
-                    if isinstance(sid, str) and sid:
-                        result_session_id = sid
-
-            proc.wait(timeout=600)
-            stderr = proc.stderr.read() if proc.stderr else ""
-            if stderr.strip():
-                emit("stderr", {"text": stderr[:2000]})
-
-            # Read back final session file content
-            final_fpath = os.path.join(get_project_dir(workspace), result_session_id + ".jsonl")
-            session_content = ""
-            if os.path.exists(final_fpath):
-                with open(final_fpath) as f:
-                    session_content = f.read()
-            emit("end", {
-                "sessionId": result_session_id,
-                "returncode": proc.returncode,
-                "sessionContent": session_content,
+            _sidecar_send({
+                "requestId": request_id,
+                "prompt": prompt,
+                "model": model,
+                "kernelId": kernel_id,
+                "isExcluded": is_excluded,
+                "priorRuns": prior_runs,
+                "workspace": get_workspace(kernel_id),
             })
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            emit("error", {"message": "claude timed out (10 min)"})
-            emit("end", {"sessionId": session_id})
         except Exception as e:
-            emit("error", {"message": str(e)})
-            emit("end", {"sessionId": session_id})
+            rlog("sidecar send failed: {}".format(e))
+            emit("error", {"message": "sidecar send failed: " + str(e)})
+            emit("end", {})
+            _sidecar_unregister_request(request_id)
+            return
+
+        end_payload = None
+        try:
+            while True:
+                try:
+                    msg = inbox.get(timeout=600)
+                except Exception:
+                    rlog("TIMEOUT waiting for sidecar")
+                    emit("error", {"message": "sidecar timed out"})
+                    break
+                mtype = msg.get("type")
+                if mtype == "event":
+                    emit("event", msg.get("event") or {})
+                elif mtype == "error":
+                    emit("error", {"message": msg.get("message") or "unknown sidecar error"})
+                elif mtype == "end":
+                    end_payload = msg.get("result") or {}
+                    break
         finally:
-            if bridge_token:
-                bridge_unregister(bridge_token)
+            _sidecar_unregister_request(request_id)
+
+        emit("end", {
+            "sessionId": request_id,
+            "result": end_payload or {},
+        })
+        rlog("EXIT")
 
     def log_message(self, format, *args):
         msg = (args[0] if args else "")
@@ -797,8 +845,9 @@ class NotebookHandler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     os.chdir(HERE)
-    server = ThreadedHTTPServer(("127.0.0.1", PORT), NotebookHandler)
-    print("Claude Notebook server running at http://localhost:" + str(PORT) + "/notebook.html", flush=True)
+    bind_host = os.environ.get("NOTEBOOK_HOST", "127.0.0.1")
+    server = ThreadedHTTPServer((bind_host, PORT), NotebookHandler)
+    print("SADataCopilot browser notebook running at http://localhost:" + str(PORT) + "/notebook.html", flush=True)
     if "NOTEBOOK_TOKEN" not in os.environ:
         print("[auth] No NOTEBOOK_TOKEN set; generated one for this run.", flush=True)
     print("[auth] Browser will prompt for a username/password.", flush=True)

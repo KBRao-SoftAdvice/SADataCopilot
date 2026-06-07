@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+.workspaces
+server.log
+*.md
+.git
+.DS_Store
+*.vsix
+node_modules
+

@@ -1,163 +1,115 @@
-# Claude Notebook — browser UI
+# SADataCopilot Browser Notebook
 
-A Jupyter-style notebook in your browser, built around `claude -p`. Mix **Python**, **Markdown**, and **Claude prompt** cells in one document. Prompt cells call Claude (Sonnet by default, Opus optional) and let it execute Python in the *same* live kernel mid-turn via an MCP `python_run` tool — so Claude can inspect `df`, run a quick check, and reason about the result before responding.
+The browser notebook is a standalone web surface for the same agentic notebook workflow used by the VS Code extension. It lets users mix Python, Markdown, and prompt cells in one browser tab, with prompt cells powered by a Node sidecar that drives the GitHub Copilot SDK in BYOK mode.
 
-Same feature surface as the VS Code extension, in a single HTML page + Python backend with no build step.
+The browser app is useful for hosted demos, lightweight shared access, and Azure Web App or container deployments where installing a VS Code extension is not the right fit.
 
 ## Features
 
-- **Three cell types** — `python` (run in a persistent kernel), `markdown` (rendered in place), `prompt` (calls Claude).
-- **Per-cell controls** — model picker (Sonnet/Opus) on prompt cells; include/exclude toggle on python and prompt cells (excluded cells stay in the UI but are dropped from Claude's view of the notebook).
-- **In-turn `python_run` (MCP)** — Claude has a `python_run` tool wired to the live notebook kernel via a localhost HTTP bridge with bearer-token auth. Same namespace as your Python cells.
-- **Inline streaming transcript** — each prompt cell renders assistant text + tool calls + tool results as they stream in, with model text visually distinct from tool blocks. `ToolSearch` is hidden.
-- **Selective turn deletion** — exclude past prompt turns and click **Prune excluded** to rewrite the on-disk session with those turns removed and the `parentUuid` chain re-linked. Original file preserved.
-- **Session library** — list and reopen any session in `~/.claude/projects/`, or load a `.jsonl` from disk.
-- **File sidebar** — left rail lists files in the per-session workspace with sizes, refreshes after each run, and has a manual `↻` button.
-- **Per-session workspace sandbox** — every kernel gets its own temp dir, and Claude's Read/Edit/Write are locked to it via the two-layer sandbox (`sandbox.filesystem` + `permissions.allow`/`deny`). Reading anywhere else returns a permission error.
-- **Optional password gate** — set `NOTEBOOK_TOKEN=<password>` to require an HTTP Basic popup before any HTML/API call. Username is ignored; only the password is checked (constant-time compare). `/api/health` stays open for tunnel/proxy probes.
-- **Bottom status bar** — `Context: NN%` and `Cost: $0.NNNN` for the live session.
-
-## Why
-
-Claude Code manages conversation history internally — you either get all of it or start fresh. There's no way to selectively remove turns that are eating up your context window. Claude Notebook solves this by exploiting the fact that Claude Code stores sessions as JSONL files at `~/.claude/projects/<project>/`. These files have a simple structure:
-
-- Each message is a JSON line with a `uuid` and `parentUuid` forming a linked chain
-- `user`, `assistant`, `system`, and `attachment` types
-- Token usage on each assistant message
-- A `last-prompt` line pointing to the leaf of the chain
-
-Since `claude -p --resume <session-id>` reads these files directly, you can remove lines, re-link the chain across the gap, write the file back, and resume — that's the underlying trick.
+- **Three cell types:** Python cells run in a persistent Python REPL, Markdown cells render in place, and Prompt cells call the agent.
+- **Shared Python kernel:** Prompt cells can invoke `python_run`, which executes code in the same kernel namespace as the Python cells.
+- **Copilot SDK sidecar:** `server.py` streams requests to `sidecar.mjs`, which manages Copilot SDK sessions, tool calls, history replay, and OpenAI-compatible BYOK model calls.
+- **Inline transcript:** Assistant responses, tool calls, Python executions, and results stream back into the prompt cell output.
+- **Per-cell context control:** Python and prompt cells can be included or excluded from future prompt context without removing them from the notebook.
+- **File sidebar:** The browser lists files in the per-kernel workspace and refreshes after runs.
+- **Session widget:** The top-right widget shows context usage, included/excluded turns, and estimated cost.
+- **Password gate:** Set `NOTEBOOK_TOKEN=<password>` to protect the UI and API with HTTP Basic auth. `/api/health` remains open for probes.
+- **Container-ready:** The browser directory includes a `Dockerfile`, `.dockerignore`, and npm package files for hosted deployment.
 
 ## Architecture
 
 ```
-Browser (notebook.html)        Python server (server.py)         Claude CLI
-       |                                |                              |
-       |-- POST /api/python/exec ----->|                              |
-       |   { kernelId, code }          |-- writes JSON request to     |
-       |                               |   the persistent Python REPL |
-       |<-- { ok, output } ------------|                              |
-       |                                                              |
-       |-- POST /api/run (SSE) ------->|-- claude -p --resume <sid>   |
-       |   { sessionId, prompt,        |     --output-format          |
-       |     kernelId, model,          |       stream-json --verbose  |
-       |     history? }                |     --mcp-config '{kernel:   |
-       |                               |       python_server.py with  |
-       |                               |       bridge env}'           |
-       |                               |     --strict-mcp-config      |
-       |                               |     --allowedTools Bash      |
-       |                               |       Read Edit Write        |
-       |                               |       mcp__kernel__python_run|
-       |                               |                              |
-       |<-- event: event { stream-json events as they arrive }
-       |<-- event: end { sessionId, sessionContent }
-       |
-       |                              MCP child (mcp/python_server.py)
-       |                                       |
-       |                                       |  python_run(code) ->
-       |                                       |  POST /api/kernel-bridge/run
-       |                                       |  Bearer <token>
-       |                                       v
-       |                                  same persistent Python REPL
-       |                                  -> returns { ok, output }
-       |
-       |-- POST /api/delete-turns ----->|-- prune turns + re-link chain
-       |<-- { new sessionId } ---------|
+Browser (notebook.html)        Python server (server.py)        Node sidecar (sidecar.mjs)
+       |                                |                                  |
+       |-- POST /api/python/exec ----->|                                  |
+       |   { kernelId, code }          |-- persistent Python REPL         |
+       |<-- { ok, output } ------------|                                  |
+       |                                                                   |
+       |-- POST /api/run (SSE) ------->|-- JSON request over stdin ------>|
+       |   { prompt, kernelId,         |   { requestId, prompt,           |
+       |     model, priorRuns,         |     model, kernelId,             |
+       |     isExcluded }              |     priorRuns, workspace }        |
+       |                                                                   |
+       |                                                                   |-- Copilot SDK
+       |                                                                   |   provider:
+       |                                                                   |   OpenAI-compatible
+       |                                                                   |   OPENAI_API_KEY
+       |                                                                   |
+       |<-- SSE event stream ----------|<-- JSON events over stdout -------|
+       |                                                                   |
+       |                              /api/kernel-bridge/run <-------------|
+       |                              Bearer token + { kernelId, code }    |
+       |                              runs python_run in the same REPL      |
 ```
 
-**notebook.html** — Single-file React app via CDN, no build step. Cells, transcript, status bar, modals.
+`server.py` is a Python stdlib HTTP server. It owns the browser API, persistent Python kernels, per-kernel workspaces, Basic auth, and the kernel bridge used by `python_run`.
 
-**server.py** — Python stdlib HTTP server (threaded). Manages one persistent `PythonKernel` subprocess per `kernelId`, the kernel bridge with per-run bearer tokens, and the SSE stream from `claude -p`.
+`sidecar.mjs` is a long-lived Node process. It loads `@github/copilot-sdk`, creates prompt sessions, replays prior included notebook cells, exposes the `python_run` tool, and returns streamed agent events to the Python server.
 
-**mcp/python_server.py** — Standalone MCP stdio server spawned by Claude. Declares `python_run`, forwards each call to the bridge URL via the bearer token Claude was given via env. One-time tokens, unregistered when the run ends.
-
-No dependencies beyond Python 3.9+ and the Claude CLI.
+`notebook.html` is a single-file React app loaded via CDN. It manages cells, transcripts, the file sidebar, context/cost widget, and prompt execution.
 
 ## Setup
 
-```bash
-cd ~/Desktop/claude/browser
-python3 server.py
-# -> Claude Notebook server running at http://localhost:8787/notebook.html
+Install JavaScript dependencies once:
 
-# Optional: gate the UI behind a Basic-auth popup (useful when tunneling).
-NOTEBOOK_TOKEN=hunter2 python3 server.py
+```bash
+cd browser
+npm install
 ```
 
-Open `http://localhost:8787/notebook.html` in your browser. If `NOTEBOOK_TOKEN` is set the browser shows a native popup — type any username and the password.
+Start the local server:
 
-## Usage
+```bash
+OPENAI_API_KEY=<key> python3 server.py
+```
 
-### Cell types
+Then open `http://localhost:8787/notebook.html`.
 
-The notebook starts with a single prompt cell. Use the `+ Python / + Markdown / + Prompt` bar between cells to insert more. Each cell has a toolbar with:
-- run / stop button
-- include toggle (◉ / ○) — drops the cell from Claude's view of the notebook in the next prompt
-- model picker (prompt cells only)
-- move-up / move-down / delete
+Optional settings:
 
-**Cmd+Enter** in any cell runs it.
+| Setting | Purpose |
+|---|---|
+| `NOTEBOOK_TOKEN` | Enables HTTP Basic auth for the browser and API. |
+| `OPENAI_API_KEY` | Required for prompt cells. Used by the sidecar provider. |
+| `OPENAI_BASE_URL` | Optional OpenAI-compatible base URL. Defaults to `https://api.openai.com/v1`. |
+| `NOTEBOOK_HOST` | Bind host. Defaults to `127.0.0.1`; container deployments set `0.0.0.0`. |
+| `NODE_BIN` | Node executable used to spawn the sidecar. Defaults to `node`. |
 
-### Running a prompt cell
-
-The server resolves session strategy as follows:
-- If you already have a `sessionId` (from a prior prompt), `--resume <sid>` so Claude sees real history including tool calls.
-- Otherwise, prior **included** Python/markdown/prompt cells are converted into a seeded JSONL session before the run, and `--resume`'d.
-- If there's no prior content, `--session-id` starts a fresh session.
-
-Claude is launched with stream-json output. Events stream into the prompt cell's transcript live: assistant text in a blue card, `python_run` calls as a Python block, code-edit tools styled per-tool, tool results matched back by `tool_use_id`. The `python_run` tool runs *in the same kernel* as your Python cells.
-
-### Viewing & loading sessions
-
-- **Sessions** button — list of recent sessions from `~/.claude/projects/`
-- **Load** — open any `.jsonl` file
-- Loading reduces JSONL into prompt cells with attached transcripts.
-
-### Pruning turns
-
-Mark prompt cells as excluded (○), then click **Prune excluded** in the header. The server rewrites the on-disk session with those turns removed and the `parentUuid` chain re-linked. The original file is preserved; you continue from the pruned session.
-
-### Status bar
-
-Bottom bar shows `Context: NN%`, `Tokens: <used> / <window>`, `Cost: $0.NNNN`, cell count, and session id.
+Python cells can run without `OPENAI_API_KEY`; prompt cells require it.
 
 ## Endpoints
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/health` | GET | Liveness check (open — used by tunnel/proxy probes) |
-| `/api/sessions` | GET | List recent sessions in `~/.claude/projects/<cwd>` |
-| `/api/session/<sid>` | GET | Read raw JSONL |
-| `/api/files?kernelId=…` | GET | List files in the kernel's per-session workspace (used by the sidebar) |
-| `/api/python/exec` | POST | Run code in the named kernel — `{ kernelId, code } -> { ok, output }` |
-| `/api/run` | POST (SSE) | Spawn `claude -p` with stream-json + MCP config; emit `event:` SSE for each line, `end:` with the final sessionId |
-| `/api/delete-turns` | POST | Prune turns from a session and re-link parent chain |
-| `/api/keepalive` | POST | Touch the kernel's last-used timestamp so the reaper leaves it alone |
-| `/api/kernel-bridge/run` | POST (bearer) | Internal — only the spawned MCP child calls this; gated by its own per-run token |
+| `/api/health` | GET | Liveness check. Intentionally unauthenticated for probes. |
+| `/api/files?kernelId=...` | GET | Lists files in the kernel workspace. |
+| `/api/python/exec` | POST | Runs Python in the named kernel. |
+| `/api/run` | POST (SSE) | Streams a prompt-cell run through the sidecar. |
+| `/api/keepalive` | POST | Keeps an active kernel from being reaped. |
+| `/api/kernel-bridge/run` | POST | Internal bridge used by the sidecar's `python_run` tool. |
 
-## Security notes
+## Container Hosting
 
-- **Two-layer filesystem sandbox.** Every kernel runs in its own temp workspace. `claude -p` is launched with both `sandbox.filesystem` (OS-level — confines Bash and any subprocess) and `permissions.allow`/`deny` (tool-level — confines Read/Edit/Write) scoped to that workspace. Outside paths return a permission error rather than data. Note: deny rules use the single-slash `/**` form; the double-slash `//**` shadows specific allow rules and would block writes inside the workspace.
-- **Optional Basic auth on the UI.** Set `NOTEBOOK_TOKEN=<password>` and every endpoint except `/api/health` requires `Authorization: Basic …`. Compares are constant-time (`hmac.compare_digest`). `/api/kernel-bridge/run` keeps its own per-run bearer token regardless.
-- The kernel bridge is on `127.0.0.1` only and requires a per-run bearer token. Tokens are unregistered the moment `claude -p` exits.
-- The MCP child gets the URL + token via env vars, never on the command line.
-- Anyone who can already read the env of the MCP child can act as it — i.e. local-user trust boundary, same as the rest of the Claude CLI.
+The included `Dockerfile` builds a Python + Node runtime, installs browser npm dependencies, copies the notebook server files, and runs `python3 -u server.py`.
 
-## Limitations
+For hosted deployments, provide at least:
 
-- The kernel is a plain `python3` REPL (`exec` in a single global dict). No notebook-style rich display, no IPython magics, no plot rendering — text stdout/stderr only.
-- One kernel per browser session; reset clears it.
-- Cell deletion in the UI doesn't delete past *messages* on disk — use **Prune excluded** for that.
-- `python_run` results persist side effects (assignments, deletes). The tool description tells Claude to prefer non-mutating queries, but it can mutate state.
-- Session resume relies on `~/.claude/projects/<cwd-as-dashes>/` — moving the project across machines doesn't carry sessions.
+```bash
+NOTEBOOK_HOST=0.0.0.0
+NOTEBOOK_TOKEN=<shared-password>
+OPENAI_API_KEY=<key>
+```
+
+Do not commit deployment files that contain live URLs, API keys, passwords, or other credentials.
 
 ## Files
 
 ```
 browser/
-├── notebook.html         # Frontend — single-file React app
-├── server.py             # Backend — Python HTTP server + kernel + SSE
-├── mcp/
-│   └── python_server.py  # Standalone MCP stdio server (python_run)
-└── README.md
+├── notebook.html       # Browser UI
+├── server.py           # Python HTTP server, kernels, auth, SSE
+├── sidecar.mjs         # Copilot SDK sidecar process
+├── package.json        # Sidecar dependencies
+├── Dockerfile          # Container image for hosted use
+└── mcp/                # Legacy MCP helper retained in the tree
 ```
